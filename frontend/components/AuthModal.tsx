@@ -16,6 +16,12 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const handleToggleMode = () => {
+    setIsLogin(!isLogin)
+    setError(null)
+    setLoading(false)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -23,19 +29,45 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
 
     try {
       if (isLogin) {
-        const formData = new FormData()
-        formData.append("username", email)
-        formData.append("password", password)
-        const response = await authApi.login(formData)
+        const params = new URLSearchParams()
+        params.append("username", email)
+        params.append("password", password)
+        const response = await authApi.login(params)
         login(response.data.access_token)
         onClose()
       } else {
         await authApi.register({ email, password, full_name: fullName })
-        setIsLogin(true)
-        setError("Registration successful! Please login.")
+        // After registration, try to log in automatically
+        const params = new URLSearchParams()
+        params.append("username", email)
+        params.append("password", password)
+        const response = await authApi.login(params)
+        login(response.data.access_token)
+        onClose()
       }
     } catch (err: any) {
-      const errorMsg = err.response?.data?.message || err.response?.data?.detail || "An error occurred"
+      console.error("Auth error:", err)
+      let errorMsg = "An error occurred"
+      
+      if (err.response?.data) {
+        // Handle standard API error structure
+        const data = err.response.data
+        errorMsg = data.message || data.detail || data.details || "An error occurred"
+        
+        // Handle FastAPI validation error (array of objects)
+        if (Array.isArray(errorMsg)) {
+          errorMsg = errorMsg.map(e => e.msg).join(", ")
+        } else if (typeof errorMsg === 'object') {
+          errorMsg = JSON.stringify(errorMsg)
+        }
+      } else if (err.request) {
+        // The request was made but no response was received
+        errorMsg = "Network error: No response from server. Is the backend running?"
+      } else {
+        // Something happened in setting up the request
+        errorMsg = err.message || "An unknown error occurred"
+      }
+      
       setError(errorMsg)
     } finally {
       setLoading(false)
@@ -43,8 +75,13 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <Card className="w-full max-w-md bg-white shadow-2xl border-ink/10">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <Card className="w-full max-w-md bg-white shadow-2xl border-ink/10" onClick={(e) => e.stopPropagation()}>
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold text-center">
             {isLogin ? "Welcome Back" : "Create Account"}
@@ -107,7 +144,7 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
             <div className="text-center mt-4">
               <button
                 type="button"
-                onClick={() => setIsLogin(!isLogin)}
+                onClick={handleToggleMode}
                 className="text-sm text-teal hover:underline"
               >
                 {isLogin ? "Don't have an account? Register" : "Already have an account? Login"}

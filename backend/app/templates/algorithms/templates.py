@@ -1,6 +1,6 @@
 from typing import Any, Dict, List
 from app.templates.base import BaseTemplate
-from app.templates.composition import CompositionAwareTemplate
+from app.templates.composition import CompositionAwareTemplate, CompositionContext
 
 class BFSTraversalTemplate(BaseTemplate):
     """Template for showing Breadth-First Search (BFS) on a graph."""
@@ -29,31 +29,31 @@ class BFSTraversalTemplate(BaseTemplate):
 
 class GraphVisualizationTemplate(CompositionAwareTemplate):
     """Base template for general graph visualization with nodes and edges."""
-    def compose(self) -> None:
+    def compose(self, context: "CompositionContext") -> None:
         nodes = self.parameters.get("nodes", ["A", "B", "C"])
         edges = self.parameters.get("edges", [[0, 1], [1, 2]])
         
         # Create node circles
         nodes_vgroup = "        nodes = VGroup(*[Circle(0.2, color=BLUE) for _ in range(len(nodes))])\n"
-        self.create_object("nodes", "group", nodes_vgroup)
+        context.add_obj("nodes", "group", nodes_vgroup)
         
         # Arrange nodes in a layout
         layout_code = "        nodes.arrange_in_grid(rows=2, buff=1.5)\n"
-        self.add_animation_code(layout_code)
+        context.add_anim(layout_code)
         
         # Create edges
         for edge in edges:
-            edge_code = f"        edge_{edge} = Line(nodes[{edge[0]}].get_center(), nodes[{edge[1]}].get_center())\n"
-            self.create_object(f"edge_{edge}", "line", edge_code)
+            edge_code = f"        edge_{edge[0]}_{edge[1]} = Line(nodes[{edge[0]}].get_center(), nodes[{edge[1]}].get_center())\n"
+            context.add_obj(f"edge_{edge[0]}_{edge[1]}", "line", edge_code)
 
 class DFSTraversalTemplate(CompositionAwareTemplate):
     """Template for Depth-First Search (DFS) visualization."""
-    def compose(self) -> None:
+    def compose(self, context: "CompositionContext") -> None:
         nodes = self.parameters.get("nodes", ["A", "B", "C", "D", "E"])
         
         # Graph structure
         graph_code = "        # Create graph with nodes\n"
-        self.add_animation_code(graph_code)
+        context.add_anim(graph_code)
         
         # DFS traversal order (root-first, depth-first)
         traversal = self.parameters.get("traversal_order", nodes)
@@ -61,11 +61,11 @@ class DFSTraversalTemplate(CompositionAwareTemplate):
         # Animate each node being visited
         for node in traversal:
             node_code = f"        # Visit {node}\n        self.wait(0.5)\n"
-            self.add_animation_code(node_code)
+            context.add_anim(node_code)
 
 class DijkstraTemplate(CompositionAwareTemplate):
     """Template for Dijkstra's shortest path algorithm visualization."""
-    def compose(self) -> None:
+    def compose(self, context: "CompositionContext") -> None:
         nodes = self.parameters.get("nodes", ["A", "B", "C", "D"])
         edges = self.parameters.get("edges", [[0, 1, 4], [0, 2, 1], [2, 1, 2], [1, 3, 5]]) # [u, v, weight]
         
@@ -98,21 +98,21 @@ class DijkstraTemplate(CompositionAwareTemplate):
 
 class TopologicalSortTemplate(CompositionAwareTemplate):
     """Template for topological sort visualization."""
-    def compose(self) -> None:
+    def compose(self, context: "CompositionContext") -> None:
         nodes = self.parameters.get("nodes", ["Task A", "Task B", "Task C"])
         
         # DAG (Directed Acyclic Graph)
         task_boxes = "        task_rects = VGroup(*[Rectangle(width=1, height=0.5, color=BLUE, fill_opacity=0.3) for _ in nodes])\n"
-        self.create_object("task_boxes", "group", task_boxes)
+        context.add_obj("task_boxes", "group", task_boxes)
         
         # Arrange vertically for DAG
         arrange_code = "        task_rects.arrange(DOWN, buff=0.8)\n"
-        self.add_animation_code(arrange_code)
+        context.add_anim(arrange_code)
         
         # Animate topological order
         for node in nodes:
             anim_code = f"        # Process {node} and its dependencies\n        self.wait(0.3)\n"
-            self.add_animation_code(anim_code)
+            context.add_anim(anim_code)
 
 class SortingTemplate(BaseTemplate):
     """Template for showing sorting algorithms using bars."""
@@ -138,19 +138,3 @@ class SortingTemplate(BaseTemplate):
         code += f"        )\n"
         code += f"        self.wait(2)\n"
         return code
-    """Template for topological sort visualization."""
-    def compose(self) -> None:
-        nodes = self.parameters.get("nodes", ["Task A", "Task B", "Task C"])
-        
-        # DAG (Directed Acyclic Graph)
-        task_boxes = "        task_rects = VGroup(*[Rectangle(width=1, height=0.5, color=BLUE, fill_opacity=0.3) for _ in nodes])\n"
-        self.create_object("task_boxes", "group", task_boxes)
-        
-        # Arrange vertically for DAG
-        arrange_code = "        task_rects.arrange(DOWN, buff=0.8)\n"
-        self.add_animation_code(arrange_code)
-        
-        # Animate topological order
-        for node in nodes:
-            anim_code = f"        # Process {node} and its dependencies\n        self.wait(0.3)\n"
-            self.add_animation_code(anim_code)

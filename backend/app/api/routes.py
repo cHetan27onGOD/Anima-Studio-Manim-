@@ -13,9 +13,11 @@ from app.db.session import get_db
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.models.job import Job, JobStatus
-from app.schemas.job import JobCreate, JobCreateResponse, JobResponse, JobUpdate
-from app.worker.tasks import render_graph_task, render_custom_code_task
+from app.schemas.job import JobCreate, JobCreateResponse, JobResponse, JobUpdate, JobRefine
+from app.services.llm import generate_plan, refine_plan
+from app.schemas.animation import AnimationPlan
 from app.api.auth import router as auth_router
+from app.worker.tasks import render_graph_task
 
 router = APIRouter()
 router.include_router(auth_router, prefix="/auth", tags=["auth"])
@@ -89,6 +91,49 @@ async def get_job(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} not found")
 
     return JobResponse.model_validate(job)
+
+
+@router.post("/jobs/{job_id}/refine", response_model=JobCreateResponse)
+async def refine_job(
+    job_id: UUID,
+    refine_data: JobRefine,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Refine an existing rendering job.
+    """
+    # 1. Get original job
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.owner_id == current_user.id))
+    original_job = result.scalar_one_or_none()
+    
+    if not original_job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} not found")
+    
+    # 2. Get original plan
+    if not original_job.plan_json:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Job has no plan to refine")
+    
+    original_plan = AnimationPlan.model_validate(original_job.plan_json)
+    
+    # 3. Refine plan using LLM
+    refined_plan = refine_plan(original_job.prompt, original_plan, refine_data.prompt)
+    
+    # 4. Create new job for refined animation
+    new_job = Job(
+        prompt=f"Refinement of {job_id}: {refine_data.prompt}",
+        status=JobStatus.QUEUED,
+        owner_id=current_user.id,
+        plan_json=refined_plan.model_dump()
+    )
+    db.add(new_job)
+    await db.commit()
+    await db.refresh(new_job)
+    
+    # 5. Queue Celery task (using the pre-generated refined plan)
+    render_graph_task.delay(str(new_job.id))
+    
+    return JobCreateResponse(job_id=new_job.id, status=new_job.status)
 
 
 @router.patch("/jobs/{job_id}", response_model=JobResponse)

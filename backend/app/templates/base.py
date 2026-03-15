@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import json
+from app.templates.styles import get_style
 
 class BaseTemplate(ABC):
     """Base class for all Manim animation templates."""
@@ -8,7 +9,15 @@ class BaseTemplate(ABC):
     def __init__(self, parameters: Dict[str, Any]):
         self.parameters = parameters
         self.scene_name = "Scene1"
-        self.background_color = "#0a0a0f"
+        
+        # Apply style preset
+        style_name = parameters.get("style", "3b1b")
+        self.style = get_style(style_name)
+        self.background_color = self.style["background_color"]
+
+    def get_style_param(self, key: str, default: Any = None) -> Any:
+        """Helper to get a style parameter, prioritizing manual template overrides."""
+        return self.parameters.get(key, self.style.get(key, default))
 
     @abstractmethod
     def generate_construct_code(self) -> str:
@@ -23,7 +32,7 @@ class BaseTemplate(ABC):
         return code
 
     def get_header(self) -> str:
-        return f"from manim import *\n\nconfig.background_color = '{self.background_color}'\n\n"
+        return f"from manim import *\nimport numpy as np\n\nconfig.background_color = '{self.background_color}'\n\n"
 
     def get_class_def(self, base_class: str = "Scene") -> str:
         return f"class {self.scene_name}({base_class}):\n    def construct(self):\n"

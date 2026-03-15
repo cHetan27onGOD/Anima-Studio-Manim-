@@ -7,6 +7,7 @@ from typing import List, Tuple
 import redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 from app.models import Job, JobStatus, User
@@ -14,8 +15,13 @@ from app.schemas.animation import AnimationPlan
 from app.services.llm import generate_manim_code, generate_plan
 from app.worker.celery_app import celery_app
 
-# Create dedicated async engine for worker
-worker_engine = create_async_engine(settings.DATABASE_URL, echo=False)
+# Create dedicated async engine for worker with NullPool
+# NullPool ensures we don't share connections between event loops in Celery worker processes
+worker_engine = create_async_engine(
+    settings.DATABASE_URL, 
+    echo=False,
+    poolclass=NullPool
+)
 WorkerAsyncSession = async_sessionmaker(worker_engine, class_=AsyncSession, expire_on_commit=False)
 
 # Redis client for log streaming
@@ -96,46 +102,68 @@ def generate_manim_code_from_plan(plan: AnimationPlan) -> str:
 async def update_job_status(job_id: str, status: JobStatus, **kwargs):
     """Update job status in database."""
     async with WorkerAsyncSession() as session:
-        result = await session.execute(select(Job).where(Job.id == job_id))
-        job = result.scalar_one_or_none()
+        async with session.begin():
+            result = await session.execute(select(Job).where(Job.id == job_id))
+            job = result.scalar_one_or_none()
 
-        if job:
-            job.status = status
-            for key, value in kwargs.items():
-                setattr(job, key, value)
-            await session.commit()
+            if job:
+                job.status = status
+                for key, value in kwargs.items():
+                    setattr(job, key, value)
 
 
 @celery_app.task(
     name="app.worker.tasks.render_graph_task",
+    bind=True,
     autoretry_for=(subprocess.TimeoutExpired,),
     retry_backoff=2,
     retry_jitter=True,
     retry_kwargs={"max_retries": 3},
 )
-def render_graph_task(job_id: str):
+def render_graph_task(self, job_id: str):
     """
     Celery task to render graph using Manim.
     """
     import asyncio
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(render_graph_async(job_id))
+    import sys
+    
+    # Ensure we have a fresh event loop for the worker thread
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(render_graph_async(job_id))
+    except Exception as e:
+        print(f"Task runner failed for job {job_id}: {str(e)}")
+        # We don't have access to publish_log here without session, 
+        # but we can at least log to stdout for docker logs
+        raise e
+    finally:
+        loop.close()
 
 
 @celery_app.task(
     name="app.worker.tasks.render_custom_code_task",
+    bind=True,
     autoretry_for=(subprocess.TimeoutExpired,),
     retry_backoff=2,
     retry_jitter=True,
     retry_kwargs={"max_retries": 3},
 )
-def render_custom_code_task(job_id: str):
+def render_custom_code_task(self, job_id: str):
     """
     Celery task to render custom Manim code.
     """
     import asyncio
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(render_custom_code_async(job_id))
+    
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(render_custom_code_async(job_id))
+    except Exception as e:
+        print(f"Custom task runner failed for job {job_id}: {str(e)}")
+        raise e
+    finally:
+        loop.close()
 
 
 async def render_custom_code_async(job_id: str):
@@ -144,6 +172,12 @@ async def render_custom_code_async(job_id: str):
     """
     logs = []
     try:
+        # Check docker connectivity first
+        try:
+            subprocess.run(["docker", "ps"], capture_output=True, check=True, timeout=5)
+        except Exception as e:
+            raise Exception(f"Docker connection failed: {str(e)}. Ensure /var/run/docker.sock is mounted and permissions are correct.")
+
         await update_job_status(job_id, JobStatus.RUNNING)
         logs.append(f"Started custom code rendering for job {job_id}")
         publish_log(job_id, "Starting custom code render...")
@@ -212,6 +246,12 @@ async def render_graph_async(job_id: str):
     logs = []
 
     try:
+        # Check docker connectivity first
+        try:
+            subprocess.run(["docker", "ps"], capture_output=True, check=True, timeout=5)
+        except Exception as e:
+            raise Exception(f"Docker connection failed: {str(e)}. Ensure /var/run/docker.sock is mounted and permissions are correct.")
+
         # Update status to running
         await update_job_status(job_id, JobStatus.RUNNING)
         logs.append(f"Started rendering job {job_id}")
@@ -219,11 +259,12 @@ async def render_graph_async(job_id: str):
 
         # Get job from database
         async with WorkerAsyncSession() as session:
-            result = await session.execute(select(Job).where(Job.id == job_id))
-            job = result.scalar_one_or_none()
-            if not job:
-                raise Exception(f"Job {job_id} not found")
-            prompt = job.prompt
+            async with session.begin():
+                result = await session.execute(select(Job).where(Job.id == job_id))
+                job = result.scalar_one_or_none()
+                if not job:
+                    raise Exception(f"Job {job_id} not found")
+                prompt = job.prompt
 
         # Step 1: LLM Planner (DSL Generation)
         logs.append("Calling LLM Planner to generate DSL...")

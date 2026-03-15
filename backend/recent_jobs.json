@@ -1,0 +1,17 @@
+[
+  {
+    "prompt": "Visualize eigenvectors of matrix [[2, 1], [1, 2]]",
+    "error": "Manim render failed (code 1) - Type Mismatch: can't multiply sequence by non-int of type 'Vector'",
+    "template": "eigenvectors_advanced"
+  },
+  {
+    "prompt": "Compare cos(x) and cos(3x) on the same axes. Draw cos(x) in BLUE and cos(3x) in RED",
+    "error": null,
+    "template": "unit_circle"
+  },
+  {
+    "prompt": "show graph of cos(x)",
+    "error": null,
+    "template": "unit_circle"
+  }
+]

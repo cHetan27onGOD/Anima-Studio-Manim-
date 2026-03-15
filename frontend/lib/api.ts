@@ -17,8 +17,9 @@ api.interceptors.request.use((config) => {
 
 export const authApi = {
   register: (data: any) => api.post('/api/auth/register', data),
-  login: (formData: FormData) => api.post('/api/auth/login', formData),
+  login: (data: URLSearchParams) => api.post('/api/auth/login', data),
   getMe: () => api.get('/api/auth/me'),
+  health: () => api.get('/api/health'),
 };
 
 export const jobApi = {

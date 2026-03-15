@@ -39,6 +39,12 @@ class JobUpdate(BaseModel):
     code: Optional[str] = None
 
 
+class JobRefine(BaseModel):
+    """Schema for refining an existing job."""
+
+    prompt: str = Field(..., min_length=1, max_length=1000, description="Refinement prompt")
+
+
 class JobCreateResponse(BaseModel):
     """Schema for job creation response."""
 

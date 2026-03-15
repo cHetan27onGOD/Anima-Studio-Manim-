@@ -1,6 +1,6 @@
 from typing import Any, Dict, List
 from app.templates.base import BaseTemplate
-from app.templates.composition import CompositionAwareTemplate
+from app.templates.composition import CompositionAwareTemplate, CompositionContext
 
 class NeuralNetworkTemplate(BaseTemplate):
     """Template for 3Blue1Brown style Neural Network architectures."""
@@ -62,31 +62,31 @@ class TransformerAttentionTemplate(BaseTemplate):
 
 class BackpropagationTemplate(CompositionAwareTemplate):
     """Template for visualizing backpropagation through a network."""
-    def compose(self) -> None:
+    def compose(self, context: "CompositionContext") -> None:
         # Simple network: input -> hidden -> output
         input_code = "        input_layer = VGroup(*[Circle(0.2, color=BLUE) for _ in range(3)])\n"
-        self.create_object("input_layer", "layer", input_code)
+        context.add_obj("input_layer", "layer", input_code)
         
         hidden_code = "        hidden_layer = VGroup(*[Circle(0.2, color=GREEN) for _ in range(4)])\n"
-        self.create_object("hidden_layer", "layer", hidden_code)
+        context.add_obj("hidden_layer", "layer", hidden_code)
         
         output_code = "        output_layer = VGroup(*[Circle(0.2, color=RED) for _ in range(2)])\n"
-        self.create_object("output_layer", "layer", output_code)
+        context.add_obj("output_layer", "layer", output_code)
         
         # Forward pass
         forward_code = "        # Forward Pass: Input -> Hidden -> Output\n        self.play(Create(input_layer), Create(hidden_layer), Create(output_layer))\n"
-        self.add_animation_code(forward_code)
+        context.add_anim(forward_code)
         
         # Backward pass
         backward_code = "        # Backward Pass: Gradient flow\n        self.wait(1)\n"
-        self.add_animation_code(backward_code)
+        context.add_anim(backward_code)
 
 class EmbeddingSpaceTemplate(CompositionAwareTemplate):
     """Template for visualizing word/token embeddings in vector space."""
-    def compose(self) -> None:
+    def compose(self, context: "CompositionContext") -> None:
         # 2D or 3D embedding space
         axes_code = "        ax = Axes(x_range=[-2, 2], y_range=[-2, 2])\n"
-        self.create_object("axes", "axes", axes_code)
+        context.add_obj("axes", "axes", axes_code)
         
         # Words as points
         words = self.parameters.get("words", ["king", "queen", "man", "woman"])
@@ -94,28 +94,28 @@ class EmbeddingSpaceTemplate(CompositionAwareTemplate):
         # Create word points
         for i, word in enumerate(words):
             point_code = f"        {word}_point = Dot(ax.c2p({i % 2}, {i // 2}), color=BLUE, radius=0.1)\n"
-            self.create_object(f"{word}_point", "dot", point_code)
+            context.add_obj(f"{word}_point", "dot", point_code)
         
         # Draw relationships
         axes_anim = "        self.play(Create(ax))\n"
         for word in words:
             axes_anim += f"        self.play(FadeIn({word}_point))\n"
-        self.add_animation_code(axes_anim)
+        context.add_anim(axes_anim)
 
 class ConvolutionFiltersTemplate(CompositionAwareTemplate):
     """Template for visualizing convolutional filters in CNNs."""
-    def compose(self) -> None:
+    def compose(self, context: "CompositionContext") -> None:
         # Input image
         img_code = "        img = Rectangle(width=2, height=2, color=BLUE_A, fill_opacity=0.3)\n"
-        self.create_object("image", "rectangle", img_code)
+        context.add_obj("image", "rectangle", img_code)
         
         # Convolution filter
         filter_code = "        kernel = Rectangle(width=0.5, height=0.5, color=GOLD, fill_opacity=0.5)\n"
-        self.create_object("kernel", "rectangle", filter_code)
+        context.add_obj("kernel", "rectangle", filter_code)
         
         # Output feature map
         output_code = "        output = Rectangle(width=1.5, height=1.5, color=GREEN, fill_opacity=0.2)\n"
-        self.create_object("output", "rectangle", output_code)
+        context.add_obj("output", "rectangle", output_code)
         
         anim_code = "        self.play(Create(img), Create(kernel))\n        self.wait(1)\n        self.play(Create(output))\n"
-        self.add_animation_code(anim_code)
+        context.add_anim(anim_code)

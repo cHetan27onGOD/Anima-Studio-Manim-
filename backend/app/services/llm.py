@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 # Redis for plan caching
 redis_client = redis.Redis.from_url(settings.REDIS_URL)
 
+class LLMQuotaExceededError(Exception):
+    """Raised when the LLM fails due to quota or token limits."""
+
 # Configuration from environment
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -49,8 +52,15 @@ Your task is to transform complex mathematical and scientific concepts into clea
 
 CORE DIRECTIVES:
 1.  **Pedagogical Depth**: Don't just show the answer. Show the *process*.
-2.  **Visual Clarity**: Use high-contrast colors (BLUE, YELLOW, GOLD, TEAL) and proper spacing.
+2.  **Visual Clarity**: Use high-contrast colors and proper spacing.
 3.  **Logical Flow**: Every animation must follow a logical sequence: Setup -> Action -> Result -> Insight.
+4.  **Visual Styles**: Choose an appropriate style based on the user's intent.
+
+VISUAL STYLE PRESETS:
+- 3b1b (Default): High-contrast, dark background, yellow/blue accents. Best for mathematical deep dives.
+- modern: Light background, vibrant blues and pinks, rounded aesthetics. Best for tech/modern concepts.
+- minimalist: Extremely clean, monochromatic with subtle accents. Best for professional/corporate presentations.
+- dark: Pure black background, stark white/red accents. Best for high-impact or dramatic explanations.
 
 AVAILABLE PHASE 2 TEMPLATES:
 - matrix_multiplication: Step-by-step dot product visualization with row/column highlighting.
@@ -75,6 +85,7 @@ STRICT JSON FORMAT:
   "intent": {{ "concept": "name", "difficulty": "beginner|intermediate|advanced" }},
   "plan": {{
     "title": "Professional Title",
+    "style": "3b1b|modern|minimalist|dark",
     "scenes": [
       {{
         "scene_id": "intro",
@@ -96,12 +107,20 @@ STRICT JSON FORMAT:
   }}
 }}
 
+REFINE MODE:
+If you are provided with an existing plan and a refinement request, your goal is to modify the existing plan while keeping its structure intact where possible.
+Refinement examples:
+- "Change the background to white" -> Change "style" to "modern"
+- "Make the labels bigger" -> Update "parameters" of text objects
+- "Add a scene explaining the result" -> Append a new scene to the "scenes" list
+
 CRITICAL: 
 - RESPONSE MUST BE JSON ONLY.
 - DO NOT INCLUDE ANY PREAMBLE OR POSTAMBLE TEXT.
+- FOR TRIGONOMETRY: Always use 'unit_circle' to explain sine/cosine fundamentally.
+- FOR EIGENVECTORS: Use 'eigenvector' (basic) or 'eigenvectors_advanced' (for equations Av=λv).
 - FOR ALGEBRA: Use 'polynomial_factoring' for equations or 'generic' with 'write_text' for derivations.
 - FOR CALCULUS: Use 'derivative_slope' for tangents or 'integral_accumulation' for areas.
-- FOR COMPLEX PHYSICS: Use 'draw_axis' and 'draw_curve' with specific expressions.
 - ENSURE ALL MATRICES AND FORMULAS ARE MATHEMATICALLY CORRECT.
 
 PEDAGOGICAL PATTERNS:
@@ -114,6 +133,26 @@ PEDAGOGICAL PATTERNS:
 
 User request: {user_prompt}
 """
+
+
+def refine_plan(original_prompt: str, original_plan: AnimationPlan, refinement_prompt: str) -> AnimationPlan:
+    """Refine an existing animation plan based on user feedback."""
+    refine_context = f"""
+ORIGINAL PROMPT: {original_prompt}
+ORIGINAL PLAN: {original_plan.model_dump_json()}
+REFINEMENT REQUEST: {refinement_prompt}
+
+Please update the plan according to the REFINEMENT REQUEST.
+"""
+    # Use the same LLM logic but with refinement context
+    try:
+        # In a real scenario, you'd call the LLM here with the refinement context.
+        # For now, we'll simulate it by calling the same logic but with the combined prompt.
+        plan = call_combined_llm_planner(refine_context)
+        return plan
+    except Exception as e:
+        logger.error(f"Refinement failed: {e}")
+        return original_plan
 
 def generate_plan(user_prompt: str) -> AnimationPlan:
     """
@@ -283,9 +322,6 @@ def rule_based_concept_router(prompt: str) -> Optional[UserIntent]:
             return UserIntent(concept=token, template=candidates[0])
 
     return None
-
-class LLMQuotaExceededError(Exception):
-    """Raised when the LLM fails due to quota or token limits."""
 
 
 def call_combined_llm_planner(user_prompt: str, hint: Optional[UserIntent] = None) -> AnimationPlan:

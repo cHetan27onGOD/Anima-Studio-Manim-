@@ -61,10 +61,14 @@ export function ToastContainer({ toasts, onClose }: { toasts: Toast[]; onClose: 
   // Only show the most recent toast (limit to 1)
   const latestToast = toasts.length > 0 ? [toasts[toasts.length - 1]] : []
 
+  if (latestToast.length === 0) return null
+
   return (
-    <div className="fixed top-6 right-6 z-50 max-w-md">
+    <div className="fixed top-6 right-6 z-50 max-w-md pointer-events-none">
       {latestToast.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} onClose={onClose} />
+        <div key={toast.id} className="pointer-events-auto">
+          <ToastItem toast={toast} onClose={onClose} />
+        </div>
       ))}
     </div>
   )

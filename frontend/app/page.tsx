@@ -248,6 +248,12 @@ export default function Home() {
     // Save prompt to localStorage
     localStorage.setItem("lastPrompt", prompt)
 
+    if (!user) {
+      setShowAuthModal(true)
+      setLoading(false)
+      return
+    }
+
     try {
       const response = await jobApi.create(prompt)
       const data = response.data

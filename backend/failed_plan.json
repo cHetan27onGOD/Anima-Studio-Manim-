@@ -1,0 +1,276 @@
+{
+  "prompt": "Visualize eigenvectors of matrix [[2, 1], [1, 2]]",
+  "error": "Manim render failed (code 1) - Type Mismatch: can't multiply sequence by non-int of type 'Vector'",
+  "plan": {
+    "title": "Eigenvectors of a Matrix",
+    "scenes": [
+      {
+        "objects": [
+          {
+            "id": "t1",
+            "type": "text",
+            "parameters": {
+              "text": "Eigenvectors of a Matrix",
+              "position": [
+                0,
+                3,
+                0
+              ]
+            }
+          }
+        ],
+        "duration": 10.285714285714286,
+        "scene_id": "intro",
+        "template": "generic",
+        "narration": "In linear algebra, an eigenvector is a non-zero vector that, when the matrix is multiplied by it, results in a scaled version of itself.",
+        "templates": [],
+        "animations": [
+          {
+            "action": "write",
+            "duration": 1.0,
+            "object_id": "t1",
+            "parameters": {}
+          }
+        ],
+        "depends_on": [],
+        "parameters": {},
+        "description": null,
+        "output_objects": []
+      },
+      {
+        "objects": [
+          {
+            "id": "m1",
+            "type": "matrix",
+            "parameters": {
+              "matrix": [
+                [
+                  2,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ]
+              ]
+            }
+          },
+          {
+            "id": "t2",
+            "type": "text",
+            "parameters": {
+              "text": "Let A = [[2, 1], [1, 2]].",
+              "position": [
+                -3,
+                0,
+                0
+              ]
+            }
+          }
+        ],
+        "duration": 5.0,
+        "scene_id": "matrix_setup",
+        "template": "generic",
+        "narration": "Let's consider the matrix A = [[2, 1], [1, 2]].",
+        "templates": [],
+        "animations": [
+          {
+            "action": "write",
+            "duration": 1.0,
+            "object_id": "m1",
+            "parameters": {}
+          },
+          {
+            "action": "write",
+            "duration": 1.0,
+            "object_id": "t2",
+            "parameters": {}
+          }
+        ],
+        "depends_on": [
+          "intro"
+        ],
+        "parameters": {},
+        "description": null,
+        "output_objects": []
+      },
+      {
+        "objects": [],
+        "duration": 6.0,
+        "scene_id": "linear_transformation",
+        "template": "eigenvectors_advanced",
+        "narration": "When we multiply A by an eigenvector, it scales the vector by a factor.",
+        "templates": [],
+        "animations": [],
+        "depends_on": [
+          "matrix_setup"
+        ],
+        "parameters": {
+          "scale_factor": 0.5
+        },
+        "description": null,
+        "output_objects": []
+      },
+      {
+        "objects": [],
+        "duration": 3.8571428571428568,
+        "scene_id": "stable_direction",
+        "template": "eigenvectors_advanced",
+        "narration": "The eigenvector is in the stable direction of A.",
+        "templates": [],
+        "animations": [],
+        "depends_on": [
+          "linear_transformation"
+        ],
+        "parameters": {
+          "scale_factor": 0.5
+        },
+        "description": null,
+        "output_objects": []
+      },
+      {
+        "objects": [
+          {
+            "id": "t3",
+            "type": "text",
+            "parameters": {
+              "text": "The eigenvalue is the scale factor.",
+              "position": [
+                -2,
+                0,
+                0
+              ]
+            }
+          }
+        ],
+        "duration": 3.0,
+        "scene_id": "eigenvalue",
+        "template": "generic",
+        "narration": "The eigenvalue is the scale factor.",
+        "templates": [],
+        "animations": [
+          {
+            "action": "write",
+            "duration": 1.0,
+            "object_id": "t3",
+            "parameters": {}
+          }
+        ],
+        "depends_on": [
+          "stable_direction"
+        ],
+        "parameters": {},
+        "description": null,
+        "output_objects": []
+      },
+      {
+        "objects": [
+          {
+            "id": "t4",
+            "type": "text",
+            "parameters": {
+              "text": "Eigenvectors of A are vectors that, when multiplied by A, result in a scaled version.",
+              "position": [
+                -3,
+                0,
+                0
+              ]
+            }
+          }
+        ],
+        "duration": 6.428571428571428,
+        "scene_id": "result",
+        "template": "generic",
+        "narration": "Eigenvectors of A are vectors that, when multiplied by A, result in a scaled version.",
+        "templates": [],
+        "animations": [
+          {
+            "action": "write",
+            "duration": 1.0,
+            "object_id": "t4",
+            "parameters": {}
+          }
+        ],
+        "depends_on": [
+          "eigenvalue"
+        ],
+        "parameters": {},
+        "description": null,
+        "output_objects": []
+      },
+      {
+        "objects": [
+          {
+            "id": "t5",
+            "type": "text",
+            "parameters": {
+              "text": "Eigenvectors are useful in many applications, including data analysis and machine learning.",
+              "position": [
+                -3,
+                0,
+                0
+              ]
+            }
+          }
+        ],
+        "duration": 5.142857142857143,
+        "scene_id": "insight",
+        "template": "generic",
+        "narration": "Eigenvectors are useful in many applications, including data analysis and machine learning.",
+        "templates": [],
+        "animations": [
+          {
+            "action": "write",
+            "duration": 1.0,
+            "object_id": "t5",
+            "parameters": {}
+          }
+        ],
+        "depends_on": [
+          "result"
+        ],
+        "parameters": {},
+        "description": null,
+        "output_objects": []
+      },
+      {
+        "objects": [
+          {
+            "id": "t6",
+            "type": "text",
+            "parameters": {
+              "text": "Thank you for watching!",
+              "position": [
+                -3,
+                0,
+                0
+              ]
+            }
+          }
+        ],
+        "duration": 3.0,
+        "scene_id": "final",
+        "template": "generic",
+        "narration": "Thank you for watching!",
+        "templates": [],
+        "animations": [
+          {
+            "action": "write",
+            "duration": 1.0,
+            "object_id": "t6",
+            "parameters": {}
+          }
+        ],
+        "depends_on": [
+          "insight"
+        ],
+        "parameters": {},
+        "description": null,
+        "output_objects": []
+      }
+    ],
+    "template": "eigenvectors_advanced",
+    "parameters": {},
+    "rate_limited": false
+  }
+}

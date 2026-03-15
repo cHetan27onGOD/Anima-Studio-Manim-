@@ -108,12 +108,20 @@ class AnimationScene(BaseModel):
         return (words / 140.0) * 60.0
 
 class AnimationPlan(BaseModel):
-    """Structured animation plan (DSL) with Scene Graph support."""
+    """Full multi-scene animation plan with scene graph support and visual style presets."""
     title: str
     template: Optional[str] = None
     parameters: Dict[str, Any] = Field(default_factory=dict)
     scenes: List[AnimationScene] = Field(default_factory=list)
     rate_limited: bool = Field(default=False, description="True if this plan was generated under quota limits")
+    
+    # Visual Style and Quality
+    style: Optional[str] = Field(default="3b1b", description="Visual style preset (3b1b, modern, minimalist, dark)")
+    quality: Optional[str] = Field(default="medium", description="Render quality (low, medium, high)")
+    
+    # Global Plan Metadata
+    duration: float = Field(default=0.0, description="Total plan duration in seconds (0 = auto-estimate)")
+    narration_pipeline: Optional[str] = Field(default="google-tts", description="Narration engine to use")
     
     def validate_scene_dependencies(self) -> List[str]:
         """

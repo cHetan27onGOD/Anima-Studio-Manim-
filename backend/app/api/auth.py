@@ -1,4 +1,6 @@
 from datetime import timedelta
+import logging
+import uuid
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -13,29 +15,50 @@ from app.models.user import User
 from app.schemas.user import Token, UserCreate, UserResponse
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.post("/register", response_model=UserResponse)
 async def register(
     user_in: UserCreate,
     db: AsyncSession = Depends(get_db)
 ) -> Any:
-    result = await db.execute(select(User).where(User.email == user_in.email))
-    user = result.scalar_one_or_none()
-    if user:
-        raise HTTPException(
-            status_code=400,
-            detail="A user with this email already exists.",
+    logger.info(f"Attempting to register user: {user_in.email}")
+    try:
+        # Check if user already exists
+        result = await db.execute(select(User).where(User.email == user_in.email))
+        user = result.scalar_one_or_none()
+        if user:
+            logger.warning(f"Registration failed: User {user_in.email} already exists")
+            raise HTTPException(
+                status_code=400,
+                detail="A user with this email already exists.",
+            )
+        
+        # Create new user
+        hashed_pw = security.get_password_hash(user_in.password)
+        user = User(
+            id=uuid.uuid4(), # Explicitly generate UUID to be safe
+            email=user_in.email,
+            hashed_password=hashed_pw,
+            full_name=user_in.full_name,
         )
-    
-    user = User(
-        email=user_in.email,
-        hashed_password=security.get_password_hash(user_in.password),
-        full_name=user_in.full_name,
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
+        
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        
+        logger.info(f"User registered successfully: {user.email}")
+        return user
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Critical registration error for {user_in.email}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error during registration. Please check logs."
+        )
 
 @router.post("/login", response_model=Token)
 async def login(

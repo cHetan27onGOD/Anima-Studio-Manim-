@@ -1,215 +1,142 @@
 from typing import Any, Dict, Type, List, Optional
 from app.templates.base import BaseTemplate
 from app.templates.composition import CompositionAwareTemplate, TemplateComposer
-from app.templates.linear_algebra.templates import (
-    MatrixMultiplicationTemplate, VectorTransformationTemplate, EigenvectorTemplate, 
-    DotProductTemplate, EigenvectorsAdvancedTemplate, VectorProjectionTemplate, 
-    BasisChangeTemplate
+from app.templates.styles import get_style
+
+# Trigonometry
+from app.templates.trigonometry.templates import (
+    UnitCircleTemplate, TrigWavesTemplate, TrigComparisonTemplate
 )
+
+# Calculus
+from app.templates.calculus.templates import (
+    DerivativeTangentTemplate, IntegralAreaTemplate, GradientDescentTemplate,
+    DerivativeSlopeTemplate, IntegralAccumulationTemplate, ChainRuleTemplate,
+    GradientDescentAdvancedTemplate, PowerRuleTemplate, TaylorSeriesTemplate
+)
+
+# Linear Algebra
+from app.templates.linear_algebra.templates import (
+    MatrixMultiplicationTemplate, VectorTransformationTemplate, EigenvectorTemplate,
+    DotProductTemplate, BasisChangeTemplate, MatrixMultiplicationCompositionTemplate,
+    EigenvectorCompositionTemplate
+)
+
+# Machine Learning
 from app.templates.machine_learning.templates import (
     NeuralNetworkTemplate, TransformerAttentionTemplate, BackpropagationTemplate,
     EmbeddingSpaceTemplate, ConvolutionFiltersTemplate
 )
-from app.templates.calculus.templates import (
-    DerivativeTangentTemplate, IntegralAreaTemplate, GradientDescentTemplate,
-    DerivativeSlopeTemplate, IntegralAccumulationTemplate, ChainRuleTemplate,
-    GradientDescentAdvancedTemplate
-)
+
+# Algorithms
 from app.templates.algorithms.templates import (
     BFSTraversalTemplate, GraphVisualizationTemplate, DFSTraversalTemplate,
-    DijkstraTemplate, TopologicalSortTemplate, SortingTemplate
+    DijkstraTemplate, TopologicalSortTemplate
 )
-from app.templates.trigonometry.templates import (
-    UnitCircleTemplate, TrigWavesTemplate
-)
-from app.templates.algebra.templates import (
-    PolynomialFactoringTemplate, EquationSolvingTemplate
-)
-from app.templates.generic import GenericAnimationTemplate
+
+# Primitives
 from app.templates.primitives import (
-    DrawCurveTemplate, 
-    PlacePointTemplate, 
-    DrawArrowTemplate, 
-    HighlightObjectTemplate,
-    DrawAxisTemplate,
-    WriteTextTemplate,
-    CreateVectorTemplate,
-    TransformObjectTemplate
+    DrawCurveTemplate, PlacePointTemplate, DrawArrowTemplate, 
+    DrawAxisTemplate, WriteTextTemplate, CreateVectorTemplate, 
+    TransformObjectTemplate, HighlightObjectTemplate
 )
 
 TEMPLATES: Dict[str, Type[BaseTemplate]] = {
-    # Phase 1: Classic Templates
-    "matrix_multiplication": MatrixMultiplicationTemplate,
-    "vector_transformation": VectorTransformationTemplate,
-    "eigenvector": EigenvectorTemplate,
-    "dot_product": DotProductTemplate,
-    "neural_network": NeuralNetworkTemplate,
-    "transformer_attention": TransformerAttentionTemplate,
+    # Trigonometry
+    "unit_circle": UnitCircleTemplate,
+    "trig_waves": TrigWavesTemplate,
+    "trig_comparison": TrigComparisonTemplate,
+    
+    # Calculus
     "derivative_tangent": DerivativeTangentTemplate,
     "integral_area": IntegralAreaTemplate,
     "gradient_descent": GradientDescentTemplate,
-    "bfs_traversal": BFSTraversalTemplate,
-    
-    # Phase 2: Advanced Composition-Aware Templates
-    "eigenvectors_advanced": EigenvectorsAdvancedTemplate,
-    "vector_projection": VectorProjectionTemplate,
-    "basis_change": BasisChangeTemplate,
     "derivative_slope": DerivativeSlopeTemplate,
     "integral_accumulation": IntegralAccumulationTemplate,
     "chain_rule": ChainRuleTemplate,
     "gradient_descent_advanced": GradientDescentAdvancedTemplate,
+    "power_rule": PowerRuleTemplate,
+    "taylor_series": TaylorSeriesTemplate,
+    
+    # Linear Algebra
+    "matrix_multiplication": MatrixMultiplicationTemplate,
+    "vector_transformation": VectorTransformationTemplate,
+    "eigenvector": EigenvectorTemplate,
+    "dot_product": DotProductTemplate,
+    "basis_change": BasisChangeTemplate,
+    "matrix_multiplication_composition": MatrixMultiplicationCompositionTemplate,
+    "eigenvector_composition": EigenvectorCompositionTemplate,
+    
+    # Machine Learning
+    "neural_network": NeuralNetworkTemplate,
+    "transformer_attention": TransformerAttentionTemplate,
     "backpropagation": BackpropagationTemplate,
-    "embedding_spaces": EmbeddingSpaceTemplate,
+    "embedding_space": EmbeddingSpaceTemplate,
     "convolution_filters": ConvolutionFiltersTemplate,
+    
+    # Algorithms
+    "bfs_traversal": BFSTraversalTemplate,
     "graph_visualization": GraphVisualizationTemplate,
     "dfs_traversal": DFSTraversalTemplate,
     "dijkstra": DijkstraTemplate,
     "topological_sort": TopologicalSortTemplate,
-    "sorting": SortingTemplate,
     
-    # Phase 2: Algebra Templates
-    "polynomial_factoring": PolynomialFactoringTemplate,
-    "equation_solving": EquationSolvingTemplate,
-    
-    # Phase 2: Trig Templates
-    "unit_circle": UnitCircleTemplate,
-    "trig_waves": TrigWavesTemplate,
-    
-    # Micro-templates (Primitives)
-    "generic": GenericAnimationTemplate,
+    # Primitives
     "draw_curve": DrawCurveTemplate,
     "place_point": PlacePointTemplate,
     "draw_arrow": DrawArrowTemplate,
-    "highlight_object": HighlightObjectTemplate,
     "draw_axis": DrawAxisTemplate,
     "write_text": WriteTextTemplate,
     "create_vector": CreateVectorTemplate,
     "transform_object": TransformObjectTemplate,
+    "highlight_object": HighlightObjectTemplate,
 }
 
-def get_template(template_name: str) -> Type[BaseTemplate]:
-    """Get a template class by name."""
-    if template_name not in TEMPLATES:
-        # Fallback to generic template if not found
-        return GenericAnimationTemplate
-    return TEMPLATES[template_name]
+def get_template(name: str) -> Type[BaseTemplate]:
+    return TEMPLATES.get(name, DrawCurveTemplate)
 
-def is_composition_aware(template_cls: Type[BaseTemplate]) -> bool:
-    """Check if a template is composition-aware (supports composition mode)."""
-    return issubclass(template_cls, CompositionAwareTemplate)
+def render_template(name: str, params: Dict[str, Any], include_header: bool = True) -> str:
+    t_cls = get_template(name)
+    t = t_cls(params)
+    return t.generate_code() if include_header else t.generate_construct_code()
 
-def render_template(template_name: str, parameters: Dict[str, Any], include_header: bool = True) -> str:
-    """Render a template with parameters to Manim code."""
-    template_cls = get_template(template_name)
-    template = template_cls(parameters)
-    
-    if include_header:
-        return template.generate_code()
-    else:
-        return template.generate_construct_code()
-
-def render_composed_scene(scene_id: str, templates_list: List[str], parameters: Dict[str, Any]) -> str:
-    """
-    Render a scene composed of multiple micro-templates with state sharing.
-    
-    Args:
-        scene_id: Unique identifier for the scene
-        templates_list: List of template names to compose
-        parameters: Parameters for all templates
-    
-    Returns:
-        Manim code with proper object scope management
-    """
+def render_composed_scene(scene_id: str, templates: List[str], params: Any) -> str:
     composer = TemplateComposer(scene_id)
-    
-    for template_name in templates_list:
-        template_cls = get_template(template_name)
-        
-        # Check if template is composition-aware
-        if is_composition_aware(template_cls):
-            template = template_cls(parameters)
-            composer.add_template(template)
-        else:
-            # For legacy templates, create a wrapper
-            import logging
-            logging.warning(f"Template {template_name} is not composition-aware, falling back to legacy render")
-    
+    for i, name in enumerate(templates):
+        t_cls = get_template(name)
+        p = params[i] if isinstance(params, list) and i < len(params) else (params if isinstance(params, dict) else {})
+        if issubclass(t_cls, CompositionAwareTemplate):
+            composer.add_template(t_cls(p))
     return composer.compose()
 
 def render_multi_scene_plan(plan: Dict[str, Any]) -> str:
-    """Render a multi-scene plan into a single Manim script using Scene Graph logic."""
-    title = plan.get("title", "Educational Animation")
-    # Check both top-level 'scenes' and nested 'parameters.scenes' for robustness
-    scenes_data = plan.get("scenes") or plan.get("parameters", {}).get("scenes", [])
+    scenes = plan.get("scenes") or plan.get("parameters", {}).get("scenes", [])
+    style_name = plan.get("style", "3b1b")
+    style = get_style(style_name)
+    bg_color = style["background_color"]
     
-    # Scene Graph: Sort scenes based on dependencies
-    ordered_scenes = _sort_scenes_by_dependency(scenes_data)
-    
-    # Header
-    code = "from manim import *\n\n"
-    code += "config.background_color = '#0a0a0f'\n\n"
-    code += f"class Scene1(Scene):\n    def construct(self):\n"
-    
-    if not ordered_scenes:
-        code += "        pass\n"
-        return code
+    code = f"from manim import *\nimport numpy as np\n\nconfig.background_color = '{bg_color}'\n\nclass Scene1(Scene):\n    def construct(self):\n"
+    for i, s in enumerate(scenes):
+        sid = s.get("scene_id", f"s{i}")
+        tmpls = s.get("templates", [])
+        params = s.get("parameters", {})
         
-    for i, scene_data in enumerate(ordered_scenes):
-        scene_id = scene_data.get("scene_id", f"scene_{i}")
-        
-        code += f"        # --- Scene: {scene_id} ---\n"
-        if scene_data.get("narration"):
-            code += f"        # Narration: {scene_data['narration']}\n"
-            
-        # COMPOSITION MODE: Check if multiple templates are specified
-        composed_templates = scene_data.get("templates", [])
-        if composed_templates:
-            # Use composition framework for stateful rendering
-            scene_params = scene_data.get("parameters", {})
-            scene_code = render_composed_scene(scene_id, composed_templates, scene_params)
-            for line in scene_code.split("\n"):
-                if line.strip():
-                    code += f"{line}\n"
+        # Inject global style into template parameters
+        if isinstance(params, dict):
+            params["style"] = style_name
+        elif isinstance(params, list):
+            for p in params:
+                if isinstance(p, dict):
+                    p["style"] = style_name
+
+        if tmpls:
+            sc_code = render_composed_scene(sid, tmpls, params)
+            # Lines already have indentation, just join them
+            code += "\n".join([l for l in sc_code.split("\n") if l.strip()]) + "\n"
         else:
-            # Single template mode (legacy/default)
-            template_name = scene_data.get("template", "generic")
-            params = scene_data.get("parameters", {})
-            if template_name == "generic":
-                params = scene_data
-            
-            scene_code = render_template(template_name, params, include_header=False)
-            for line in scene_code.split("\n"):
-                if line.strip():
-                    code += f"{line}\n"
-        
-        # CLEAR SCREEN BETWEEN SCENES TO PREVENT OVERLAP
-        # But only if it's not the last scene and we want fresh start
-        if i < len(ordered_scenes) - 1:
-            code += "        self.play(FadeOut(*self.mobjects))\n"
-            code += "        self.next_section()\n"
-            code += "        self.wait(1)\n\n"
-        
+            tname = s.get("template", "draw_curve")
+            sc_code = render_template(tname, params, False)
+            code += "\n".join([l for l in sc_code.split("\n") if l.strip()]) + "\n"
+        if i < len(scenes) - 1:
+            code += "        self.play(FadeOut(*self.mobjects))\n        self.wait(1)\n"
     return code
-
-def _sort_scenes_by_dependency(scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Sort scenes based on their 'depends_on' field."""
-    # For now, we'll implement a simple dependency order
-    # In a production system, this would be a full topological sort
-    scene_map = {s["scene_id"]: s for s in scenes}
-    visited = set()
-    result = []
-
-    def visit(scene_id):
-        if scene_id in visited:
-            return
-        visited.add(scene_id)
-        scene = scene_map.get(scene_id)
-        if not scene:
-            return
-        for dep in scene.get("depends_on", []):
-            visit(dep)
-        result.append(scene)
-
-    for s in scenes:
-        visit(s["scene_id"])
-    return result

@@ -1,0 +1,76 @@
+--- UnitCircle ---
+from manim import *
+
+config.background_color = '#0a0a0f'
+
+class Scene1(Scene):
+    def construct(self):
+        # Scene initialization
+        # --- Objects Initialization ---
+        # axes: axes
+        ax = Axes(x_range=[-1.5, 1.5], y_range=[-1.5, 1.5], axis_config={'include_tip': True})
+        # circle: circle
+        circle = Circle(radius=ax.get_x_unit_size(), color=WHITE).move_to(ax.c2p(0, 0))
+        # t: tracker
+        t = ValueTracker(0)
+        # dot: dot
+        dot = always_redraw(lambda: Dot(ax.c2p(np.cos(t.get_value()), np.sin(t.get_value())), color=YELLOW))
+        # line: line
+        line = always_redraw(lambda: Line(ax.c2p(0, 0), dot.get_center(), color=YELLOW))
+        # cos_line: line
+        cos_line = always_redraw(lambda: Line(ax.c2p(0, 0), ax.c2p(np.cos(t.get_value()), 0), color=ORANGE, stroke_width=6))
+        # sin_line: line
+        sin_line = always_redraw(lambda: Line(ax.c2p(np.cos(t.get_value()), 0), dot.get_center(), color=GREEN, stroke_width=6))
+        # cos_label: label
+        cos_label = MathTex(r'\\cos(\\theta)', color=ORANGE).to_corner(UL)
+        # sin_label: label
+        sin_label = MathTex(r'\\sin(\\theta)', color=GREEN).next_to(cos_label, DOWN)
+
+        # --- Animations ---
+        self.play(Create(ax), Create(circle))
+        self.add(line, dot, cos_line, sin_line, cos_label, sin_label)
+        self.play(t.animate.set_value(TAU), run_time=8, rate_func=linear)
+        self.wait(2)
+
+--- TrigWaves ---
+from manim import *
+
+config.background_color = '#0a0a0f'
+
+class Scene1(Scene):
+    def construct(self):
+        # Scene initialization
+        # --- Objects Initialization ---
+        # ax: axes
+        ax = Axes(x_range=[0, TAU, PI/2], y_range=[-1.5, 1.5], axis_config={'include_tip': True}).scale(0.8).to_edge(RIGHT)
+        # circle_ax: axes
+        circle_ax = Axes(x_range=[-1.2, 1.2], y_range=[-1.2, 1.2]).scale(0.8).to_edge(LEFT)
+        # circle: circle
+        circle = Circle(radius=circle_ax.get_x_unit_size() * 0.8, color=WHITE).move_to(circle_ax.c2p(0, 0))
+        # t: tracker
+        t = ValueTracker(0)
+        # dot: dot
+        dot = always_redraw(lambda: Dot(color=YELLOW).move_to(circle_ax.c2p(0.8*np.cos(t.get_value()), 0.8*np.sin(t.get_value()))))
+        # curve: curve
+        curve = always_redraw(lambda: ax.plot(lambda x: np.cos(x), x_range=[0, t.get_value()], color=GREEN))
+
+        # --- Animations ---
+        self.play(Create(circle_ax), Create(circle), Create(ax))
+        self.add(dot, curve)
+        self.play(t.animate.set_value(TAU), run_time=6, rate_func=linear)
+        self.wait(2)
+
+--- Comparison ---
+        # Scene initialization
+        # --- Objects Initialization ---
+        # axes: axes
+        ax = Axes(x_range=[-5, 5], y_range=[-3, 3], axis_config={'include_tip': True})
+        # c1: curve
+        c1 = ax.plot(lambda x: np.sin(x), color=BLUE)
+        # c2: curve
+        c2 = ax.plot(lambda x: np.cos(x), color=BLUE)
+
+        # --- Animations ---
+        self.play(Create(c1))
+        self.play(Create(c2))
+
