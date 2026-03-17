@@ -47,9 +47,9 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       LLM_MODEL: ${LLM_MODEL}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
-      OPENAI_MODEL: ${OPENAI_MODEL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
     volumes:
       - ./backend:/app
       - ./outputs:/app/outputs
@@ -77,9 +77,9 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       LLM_MODEL: ${LLM_MODEL}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
-      OPENAI_MODEL: ${OPENAI_MODEL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
     volumes:
       - ./backend:/app
       - ./outputs:/app/outputs

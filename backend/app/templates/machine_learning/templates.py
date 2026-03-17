@@ -1,10 +1,12 @@
 from typing import Any, Dict, List
+
 from app.templates.base import BaseTemplate
 from app.templates.composition import CompositionAwareTemplate, CompositionContext
 
+
 class NeuralNetworkTemplate(BaseTemplate):
     """Template for 3Blue1Brown style Neural Network architectures."""
-    
+
     def generate_construct_code(self) -> str:
         layers = self.parameters.get("layers", [3, 4, 2])
         code = f"        # Neural Network Pattern\n"
@@ -30,9 +32,110 @@ class NeuralNetworkTemplate(BaseTemplate):
         code += f"        self.wait(2)\n"
         return code
 
+
+class MnistRecognitionTemplate(BaseTemplate):
+    """Template for explaining MNIST digit recognition end-to-end."""
+
+    def generate_construct_code(self) -> str:
+        sample_digits = self.parameters.get("sample_digits", [3, 8, 1, 6])
+        probabilities = self.parameters.get(
+            "probabilities",
+            [0.02, 0.03, 0.01, 0.06, 0.02, 0.04, 0.05, 0.07, 0.65, 0.05],
+        )
+
+        try:
+            probs = [float(p) for p in probabilities][:10]
+        except Exception:
+            probs = [0.02, 0.03, 0.01, 0.06, 0.02, 0.04, 0.05, 0.07, 0.65, 0.05]
+
+        if len(probs) < 10:
+            probs += [0.0] * (10 - len(probs))
+
+        max_prob = max(probs) if max(probs) > 0 else 1.0
+        predicted_digit = int(max(range(len(probs)), key=lambda i: probs[i]))
+        confidence_pct = round(probs[predicted_digit] * 100, 1)
+
+        code = f"        # MNIST Recognition Pipeline\n"
+        code += f"        title = Text('How MNIST Digit Recognition Works', font_size=36, color=YELLOW)\n"
+        code += f"        title.to_edge(UP)\n"
+        code += f"        self.play(Write(title))\n"
+        code += f"\n"
+
+        code += f"        sample_digits = {sample_digits}\n"
+        code += f"        samples = VGroup()\n"
+        code += f"        for d in sample_digits:\n"
+        code += f"            frame = Square(side_length=0.9, color=BLUE_C, fill_opacity=0.15)\n"
+        code += f"            digit = Text(str(d), font_size=32).move_to(frame.get_center())\n"
+        code += f"            tile = VGroup(frame, digit)\n"
+        code += f"            samples.add(tile)\n"
+        code += f"        samples.arrange(RIGHT, buff=0.2).to_edge(LEFT, buff=0.7).shift(UP*0.4)\n"
+        code += f"        input_label = Text('Input: 28x28 grayscale digits', font_size=22).next_to(samples, DOWN, buff=0.25)\n"
+        code += f"        self.play(FadeIn(samples), Write(input_label))\n"
+        code += f"        self.play(Indicate(samples[1]))\n"
+        code += f"\n"
+
+        code += f"        cnn_block = RoundedRectangle(width=3.8, height=1.4, corner_radius=0.15, color=TEAL, fill_opacity=0.15)\n"
+        code += f"        cnn_block.move_to([-0.4, 0.5, 0])\n"
+        code += f"        cnn_text = Text('Convolution + ReLU + Pooling', font_size=24).move_to(cnn_block.get_center())\n"
+        code += f"        arrow_in = Arrow(samples.get_right() + RIGHT*0.2, cnn_block.get_left() + LEFT*0.05, buff=0.05, color=BLUE_B)\n"
+        code += f"        self.play(GrowArrow(arrow_in), Create(cnn_block), Write(cnn_text))\n"
+        code += f"\n"
+
+        code += f"        feature_heights = [0.8, 1.4, 1.0, 1.8, 1.2, 0.9]\n"
+        code += f"        feature_maps = VGroup(*[Rectangle(width=0.2, height=h, color=GREEN, fill_opacity=0.55) for h in feature_heights])\n"
+        code += (
+            f"        feature_maps.arrange(RIGHT, buff=0.08).next_to(cnn_block, RIGHT, buff=0.7)\n"
+        )
+        code += f"        feature_label = Text('Extracted features', font_size=20).next_to(feature_maps, DOWN, buff=0.2)\n"
+        code += f"        arrow_mid = Arrow(cnn_block.get_right() + RIGHT*0.05, feature_maps.get_left() + LEFT*0.05, buff=0.05, color=GREEN_B)\n"
+        code += f"        self.play(\n"
+        code += f"            GrowArrow(arrow_mid),\n"
+        code += f"            LaggedStart(*[GrowFromEdge(bar, DOWN) for bar in feature_maps], lag_ratio=0.12),\n"
+        code += f"            Write(feature_label)\n"
+        code += f"        )\n"
+        code += f"\n"
+
+        code += f"        classifier = RoundedRectangle(width=2.6, height=1.0, corner_radius=0.12, color=PURPLE, fill_opacity=0.12)\n"
+        code += f"        classifier.next_to(feature_maps, RIGHT, buff=0.6)\n"
+        code += f"        classifier_text = Text('Dense + Softmax', font_size=22).move_to(classifier.get_center())\n"
+        code += f"        arrow_cls = Arrow(feature_maps.get_right() + RIGHT*0.05, classifier.get_left() + LEFT*0.05, buff=0.05, color=PURPLE_B)\n"
+        code += (
+            f"        self.play(GrowArrow(arrow_cls), Create(classifier), Write(classifier_text))\n"
+        )
+        code += f"\n"
+
+        code += f"        probs = {probs}\n"
+        code += f"        max_prob = {max_prob}\n"
+        code += f"        bars = VGroup()\n"
+        code += f"        digits = VGroup()\n"
+        code += f"        for i, p in enumerate(probs):\n"
+        code += f"            h = 0.3 + 2.1 * (p / max_prob)\n"
+        code += (
+            f"            bar = Rectangle(width=0.33, height=h, color=BLUE_D, fill_opacity=0.75)\n"
+        )
+        code += f"            bars.add(bar)\n"
+        code += f"            digits.add(Text(str(i), font_size=16))\n"
+        code += f"        bars.arrange(RIGHT, buff=0.06, aligned_edge=DOWN).to_edge(RIGHT, buff=0.45).shift(DOWN*0.2)\n"
+        code += f"        for label, bar in zip(digits, bars):\n"
+        code += f"            label.next_to(bar, DOWN, buff=0.06)\n"
+        code += f"        prob_label = Text('Class probabilities', font_size=20).next_to(bars, UP, buff=0.18)\n"
+        code += f"        arrow_out = Arrow(classifier.get_right() + RIGHT*0.05, bars.get_left() + LEFT*0.05, buff=0.05, color=BLUE_A)\n"
+        code += f"        self.play(GrowArrow(arrow_out), Create(bars), Write(digits), Write(prob_label))\n"
+        code += f"\n"
+
+        code += f"        pred = {predicted_digit}\n"
+        code += f"        confidence = {confidence_pct}\n"
+        code += f"        self.play(bars[pred].animate.set_color(YELLOW), digits[pred].animate.set_color(YELLOW))\n"
+        code += f"        pred_text = Text(f'Prediction: {{pred}}', font_size=30, color=YELLOW).to_edge(DOWN).shift(LEFT*2.0)\n"
+        code += f"        conf_text = Text(f'Confidence: {{confidence}}%', font_size=24, color=WHITE).next_to(pred_text, RIGHT, buff=0.5)\n"
+        code += f"        self.play(Write(pred_text), Write(conf_text))\n"
+        code += f"        self.wait(2)\n"
+        return code
+
+
 class TransformerAttentionTemplate(BaseTemplate):
     """Template for 3Blue1Brown style Transformer Attention mechanisms."""
-    
+
     def generate_construct_code(self) -> str:
         tokens = self.parameters.get("tokens", ["Token 1", "Token 2", "Token 3"])
         code = f"        # Transformer Attention Pattern\n"
@@ -58,64 +161,79 @@ class TransformerAttentionTemplate(BaseTemplate):
         code += f"        self.wait(2)\n"
         return code
 
+
 # Phase 2: Advanced Machine Learning Templates
+
 
 class BackpropagationTemplate(CompositionAwareTemplate):
     """Template for visualizing backpropagation through a network."""
+
     def compose(self, context: "CompositionContext") -> None:
         # Simple network: input -> hidden -> output
         input_code = "        input_layer = VGroup(*[Circle(0.2, color=BLUE) for _ in range(3)])\n"
         context.add_obj("input_layer", "layer", input_code)
-        
-        hidden_code = "        hidden_layer = VGroup(*[Circle(0.2, color=GREEN) for _ in range(4)])\n"
+
+        hidden_code = (
+            "        hidden_layer = VGroup(*[Circle(0.2, color=GREEN) for _ in range(4)])\n"
+        )
         context.add_obj("hidden_layer", "layer", hidden_code)
-        
+
         output_code = "        output_layer = VGroup(*[Circle(0.2, color=RED) for _ in range(2)])\n"
         context.add_obj("output_layer", "layer", output_code)
-        
+
         # Forward pass
         forward_code = "        # Forward Pass: Input -> Hidden -> Output\n        self.play(Create(input_layer), Create(hidden_layer), Create(output_layer))\n"
         context.add_anim(forward_code)
-        
+
         # Backward pass
         backward_code = "        # Backward Pass: Gradient flow\n        self.wait(1)\n"
         context.add_anim(backward_code)
 
+
 class EmbeddingSpaceTemplate(CompositionAwareTemplate):
     """Template for visualizing word/token embeddings in vector space."""
+
     def compose(self, context: "CompositionContext") -> None:
         # 2D or 3D embedding space
         axes_code = "        ax = Axes(x_range=[-2, 2], y_range=[-2, 2])\n"
         context.add_obj("axes", "axes", axes_code)
-        
+
         # Words as points
         words = self.parameters.get("words", ["king", "queen", "man", "woman"])
-        
+
         # Create word points
         for i, word in enumerate(words):
-            point_code = f"        {word}_point = Dot(ax.c2p({i % 2}, {i // 2}), color=BLUE, radius=0.1)\n"
+            point_code = (
+                f"        {word}_point = Dot(ax.c2p({i % 2}, {i // 2}), color=BLUE, radius=0.1)\n"
+            )
             context.add_obj(f"{word}_point", "dot", point_code)
-        
+
         # Draw relationships
         axes_anim = "        self.play(Create(ax))\n"
         for word in words:
             axes_anim += f"        self.play(FadeIn({word}_point))\n"
         context.add_anim(axes_anim)
 
+
 class ConvolutionFiltersTemplate(CompositionAwareTemplate):
     """Template for visualizing convolutional filters in CNNs."""
+
     def compose(self, context: "CompositionContext") -> None:
         # Input image
         img_code = "        img = Rectangle(width=2, height=2, color=BLUE_A, fill_opacity=0.3)\n"
         context.add_obj("image", "rectangle", img_code)
-        
+
         # Convolution filter
-        filter_code = "        kernel = Rectangle(width=0.5, height=0.5, color=GOLD, fill_opacity=0.5)\n"
+        filter_code = (
+            "        kernel = Rectangle(width=0.5, height=0.5, color=GOLD, fill_opacity=0.5)\n"
+        )
         context.add_obj("kernel", "rectangle", filter_code)
-        
+
         # Output feature map
-        output_code = "        output = Rectangle(width=1.5, height=1.5, color=GREEN, fill_opacity=0.2)\n"
+        output_code = (
+            "        output = Rectangle(width=1.5, height=1.5, color=GREEN, fill_opacity=0.2)\n"
+        )
         context.add_obj("output", "rectangle", output_code)
-        
+
         anim_code = "        self.play(Create(img), Create(kernel))\n        self.wait(1)\n        self.play(Create(output))\n"
         context.add_anim(anim_code)

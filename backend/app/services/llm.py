@@ -1,31 +1,33 @@
 """LLM service for generating animation plans using Google Gemini with intent validation."""
 
+import hashlib
 import json
 import logging
 import os
 import re
-import hashlib
-from typing import Any, Optional, Dict
+from typing import Any, Dict, Optional
 
 import google.generativeai as genai
-from google.generativeai.types import HarmBlockThreshold, HarmCategory
 import redis
+from google.generativeai.types import HarmBlockThreshold, HarmCategory
 from pydantic import ValidationError
 
+from app.core.config import settings
 from app.schemas.animation import AnimationPlan
 from app.schemas.intent import UserIntent
-from app.core.config import settings
-from app.templates.engine import TEMPLATES as AVAILABLE_TEMPLATES
-from app.templates.capabilities import get_capability_registry
 from app.services.narration import NarrationPipeline
+from app.templates.capabilities import get_capability_registry
+from app.templates.engine import TEMPLATES as AVAILABLE_TEMPLATES
 
 logger = logging.getLogger(__name__)
 
 # Redis for plan caching
 redis_client = redis.Redis.from_url(settings.REDIS_URL)
 
+
 class LLMQuotaExceededError(Exception):
     """Raised when the LLM fails due to quota or token limits."""
+
 
 # Configuration from environment
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower()
@@ -39,7 +41,7 @@ if LLM_PROVIDER == "gemini":
         except Exception as e:
             logger.error(f"Failed to configure Gemini: {e}")
 
-LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.0-flash-exp")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.0-flash")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
@@ -64,16 +66,18 @@ VISUAL STYLE PRESETS:
 
 AVAILABLE PHASE 2 TEMPLATES:
 - matrix_multiplication: Step-by-step dot product visualization with row/column highlighting.
-- eigenvectors_advanced: Shows linear transformation, scaling, and the stable direction of eigenvectors.
-- vector_projection: Geometric projection of vectors with dashed lines.
+- eigenvector: Shows linear transformation, scaling, and the stable direction of eigenvectors.
+- vector_transformation: Geometric transformation of vectors.
 - derivative_slope: Visualizes the tangent line approaching the derivative (f'(x)).
 - integral_accumulation: Visualizes Riemann sums and area under curve (∫f(x)dx).
-- polynomial_factoring: Visualizes algebraic splitting of polynomials using area models.
 - unit_circle: Visualizes sin/cos projections on a rotating unit circle.
 - trig_waves: Generates sine/cosine waves from a rotating unit circle.
 - sorting: Visualizes sorting algorithms (like bubble sort) using bars.
 - dijkstra: Visualizes shortest path in a weighted graph.
-- projectile_motion: (Compose: draw_axis + draw_curve + place_point) Parabolic motion with gravity.
+- graph_visualization: Visualizes graph structures such as Markov chains.
+- neural_network / backpropagation / convolution_filters: Visualize ML training pipelines.
+- transformer_attention / embedding_space: Visualize LLM token and embedding flow.
+- mnist_recognition: End-to-end MNIST pipeline (digit input -> feature extraction -> class probabilities).
 
 SCENE GRAPH COMPOSITION:
 - Break the explanation into 3-6 distinct scenes.
@@ -117,10 +121,18 @@ Refinement examples:
 CRITICAL: 
 - RESPONSE MUST BE JSON ONLY.
 - DO NOT INCLUDE ANY PREAMBLE OR POSTAMBLE TEXT.
+- ALL NUMERIC PARAMETERS MUST BE CONCRETE NUMBERS, NEVER SYMBOLIC VARIABLE NAMES.
+  For example, use "radius": 1.0 NOT "radius": "r". Use "side_length": 2.0 NOT "side_length": "a".
+  If the prompt says "radius r", pick a sensible default like 1.0 or 2.0.
+- NEVER USE UNDEFINED PYTHON VARIABLES in object parameters or expression strings.
+  Expressions must only use x (the curve variable), constants, and numpy functions (np.sin, np.pi, etc).
 - FOR TRIGONOMETRY: Always use 'unit_circle' to explain sine/cosine fundamentally.
-- FOR EIGENVECTORS: Use 'eigenvector' (basic) or 'eigenvectors_advanced' (for equations Av=λv).
-- FOR ALGEBRA: Use 'polynomial_factoring' for equations or 'generic' with 'write_text' for derivations.
+- FOR EIGENVECTORS: Use 'eigenvector'.
+- FOR ALGEBRA OR SYSTEMS OF EQUATIONS: Use 'generic' with math_tex objects and matrix/determinant steps.
 - FOR CALCULUS: Use 'derivative_slope' for tangents or 'integral_accumulation' for areas.
+- FOR TOKENIZATION/LLMs: Prefer 'transformer_attention' and optionally 'embedding_space'.
+- FOR MARKOV CHAINS: Prefer 'graph_visualization'.
+- FOR MNIST DIGIT RECOGNITION: Prefer 'mnist_recognition'.
 - ENSURE ALL MATRICES AND FORMULAS ARE MATHEMATICALLY CORRECT.
 
 PEDAGOGICAL PATTERNS:
@@ -135,7 +147,9 @@ User request: {user_prompt}
 """
 
 
-def refine_plan(original_prompt: str, original_plan: AnimationPlan, refinement_prompt: str) -> AnimationPlan:
+def refine_plan(
+    original_prompt: str, original_plan: AnimationPlan, refinement_prompt: str
+) -> AnimationPlan:
     """Refine an existing animation plan based on user feedback."""
     refine_context = f"""
 ORIGINAL PROMPT: {original_prompt}
@@ -153,6 +167,7 @@ Please update the plan according to the REFINEMENT REQUEST.
     except Exception as e:
         logger.error(f"Refinement failed: {e}")
         return original_plan
+
 
 def generate_plan(user_prompt: str) -> AnimationPlan:
     """
@@ -195,6 +210,19 @@ def generate_plan(user_prompt: str) -> AnimationPlan:
         if concept_intent and concept_intent.template and not plan.template:
             plan.template = concept_intent.template
 
+        # Strong override for MNIST prompts to avoid generic neural-network-only output.
+        if (
+            concept_intent
+            and concept_intent.concept == "mnist"
+            and plan.template
+            in {
+                None,
+                "generic",
+                "neural_network",
+            }
+        ):
+            plan.template = "mnist_recognition"
+
         # 4. Validate Plan
         violations = validate_plan_against_intent(plan, concept_intent, user_prompt)
         if violations:
@@ -214,11 +242,14 @@ def generate_plan(user_prompt: str) -> AnimationPlan:
         except Exception as e:
             logger.warning(f"Cache storage failed: {e}")
 
-        logger.info("plan_generated", extra={
-            "template": plan.template,
-            "title": plan.title,
-            "scenes": len(plan.parameters.get("scenes", [])) if plan.template == "generic" else 1
-        })
+        logger.info(
+            "plan_generated",
+            extra={
+                "template": plan.template,
+                "title": plan.title,
+                "scenes": len(plan.scenes) if plan.scenes else 1,
+            },
+        )
         return plan
 
     except LLMQuotaExceededError as e:
@@ -229,16 +260,19 @@ def generate_plan(user_prompt: str) -> AnimationPlan:
         logger.error(f"Plan generation failed: {e}", exc_info=True)
         return AnimationPlan.create_fallback(user_prompt)
 
+
 def generate_manim_code(user_prompt: str) -> str:
     """
     Generate Manim Python code from user prompt.
     """
     # 1. Generate the plan (uses caching, combined LLM call, and validation)
     plan = generate_plan(user_prompt)
-    
+
     # 2. Convert plan to code using the template engine
     from app.worker.tasks import generate_manim_code_from_plan
+
     return generate_manim_code_from_plan(plan)
+
 
 def rule_based_concept_router(prompt: str) -> Optional[UserIntent]:
     """
@@ -246,17 +280,29 @@ def rule_based_concept_router(prompt: str) -> Optional[UserIntent]:
     Returns a hint for the LLM planner.
     """
     p = prompt.lower()
-    
+
+    # LLM / NLP concepts
+    if "tokenization" in p or ("token" in p and ("gpt" in p or "chatgpt" in p or "llm" in p)):
+        return UserIntent(concept="tokenization", template="transformer_attention")
+    if "markov" in p:
+        return UserIntent(concept="markov_chain", template="graph_visualization")
+    if "mnist" in p or (
+        ("recognize" in p or "classification" in p) and ("digit" in p or "handwritten" in p)
+    ):
+        return UserIntent(concept="mnist", template="mnist_recognition")
+    if "cramer" in p or ("system" in p and "linear equation" in p):
+        return UserIntent(concept="cramers_rule", template="generic")
+
     # Linear Algebra concepts
     if "eigenvector" in p or "eigenvalue" in p:
-        return UserIntent(concept="eigenvectors", template="eigenvectors_advanced")
+        return UserIntent(concept="eigenvectors", template="eigenvector")
     if "projection" in p and "vector" in p:
-        return UserIntent(concept="vector_projection", template="vector_projection")
+        return UserIntent(concept="vector_projection", template="vector_transformation")
     if "basis" in p and ("change" in p or "transform" in p):
         return UserIntent(concept="basis_change", template="basis_change")
     if "dot product" in p or "dot product" in p:
         return UserIntent(concept="dot_product", template="dot_product")
-    
+
     # Calculus concepts
     if ("derivative" in p or "tangent" in p) and "slope" in p:
         return UserIntent(concept="derivative_slope", template="derivative_slope")
@@ -268,7 +314,7 @@ def rule_based_concept_router(prompt: str) -> Optional[UserIntent]:
         return UserIntent(concept="gradient_descent", template="gradient_descent_advanced")
     if "derivative" in p or "tangent" in p:
         return UserIntent(concept="derivative_tangent", template="derivative_tangent")
-    
+
     # Algorithm concepts
     if "bfs" in p or "breadth first" in p or "breadth-first" in p:
         return UserIntent(concept="bfs", template="bfs_traversal")
@@ -280,19 +326,19 @@ def rule_based_concept_router(prompt: str) -> Optional[UserIntent]:
         return UserIntent(concept="topological_sort", template="topological_sort")
     if "graph" in p and ("traverse" in p or "search" in p or "visit" in p):
         return UserIntent(concept="graph_search", template="graph_visualization")
-    
-    # Machine Learning concepts  
+
+    # Machine Learning concepts
     if "backpropagation" in p or "backprop" in p or ("back" in p and "gradient" in p):
         return UserIntent(concept="backpropagation", template="backpropagation")
     if "embedding" in p or "latent space" in p or "word vector" in p:
-        return UserIntent(concept="embeddings", template="embedding_spaces")
+        return UserIntent(concept="embeddings", template="embedding_space")
     if "convolution" in p or "filter" in p and "cnn" in p:
         return UserIntent(concept="convolution", template="convolution_filters")
     if "neural" in p or "network" in p:
         return UserIntent(concept="neural_network", template="neural_network")
     if "attention" in p or "transformer" in p:
         return UserIntent(concept="transformer", template="transformer_attention")
-    
+
     # Phase 1 templates (backward compatibility)
     if "matr" in p and ("multiply" in p or "multiplicat" in p):
         return UserIntent(concept="matrix_multiplication", template="matrix_multiplication")
@@ -305,7 +351,7 @@ def rule_based_concept_router(prompt: str) -> Optional[UserIntent]:
     if "integral" in p or "area under" in p:
         return UserIntent(concept="calculus_integral", template="integral_accumulation")
     if "factor" in p or "polynomial" in p:
-        return UserIntent(concept="algebra_factoring", template="polynomial_factoring")
+        return UserIntent(concept="algebra_factoring", template="generic")
     if "unit circle" in p or "trig" in p or "sin" in p or "cos" in p:
         return UserIntent(concept="trigonometry", template="unit_circle")
     if "sort" in p or "bubble" in p:
@@ -379,7 +425,7 @@ def call_combined_llm_planner(user_prompt: str, hint: Optional[UserIntent] = Non
             response = model.generate_content(full_prompt)
         except Exception as e:
             msg = str(e)
-            if 'quota' in msg.lower() or 'limit' in msg.lower() or '429' in msg:
+            if "quota" in msg.lower() or "limit" in msg.lower() or "429" in msg:
                 raise LLMQuotaExceededError(msg)
             logger.error(f"Gemini planner call failed: {e}")
             raise
@@ -389,6 +435,7 @@ def call_combined_llm_planner(user_prompt: str, hint: Optional[UserIntent] = Non
         return AnimationPlan(**data["plan"])
     else:
         raise ValueError(f"Unsupported LLM_PROVIDER '{LLM_PROVIDER}'")
+
 
 def validate_plan_against_intent(
     plan: AnimationPlan, intent: Optional[UserIntent], user_prompt: str
@@ -402,18 +449,21 @@ def validate_plan_against_intent(
     if plan.template and plan.template not in AVAILABLE_TEMPLATES and plan.template != "generic":
         violations.append(f"Unknown template: {plan.template}")
 
-    # Validate scenes
-    scenes = plan.parameters.get("scenes", [])
+    # Validate scenes — plan.scenes is the authoritative Pydantic list;
+    # fall back to the legacy parameters dict for old-style plans.
+    scenes = (
+        [s.model_dump() for s in plan.scenes] if plan.scenes else plan.parameters.get("scenes", [])
+    )
     if not scenes:
         violations.append("Plan must have at least one scene")
-    
+
     if len(scenes) > 8:  # Allow up to 8 scenes for complex explanations
         violations.append(f"Too many scenes: max 8, got {len(scenes)}")
-    
+
     # Validate each scene
     for scene in scenes:
         scene_id = scene.get("scene_id", "unknown")
-        
+
         # Check composition mode
         templates = scene.get("templates", [])
         if templates:
@@ -426,29 +476,27 @@ def validate_plan_against_intent(
             t_name = scene.get("template", "generic")
             if t_name not in AVAILABLE_TEMPLATES and t_name != "generic":
                 violations.append(f"Scene '{scene_id}' uses unknown template: {t_name}")
-        
+
         # Check dependencies (must reference existing scenes)
         depends = scene.get("depends_on", [])
         scene_ids = {s.get("scene_id") for s in scenes}
         for dep in depends:
             if dep not in scene_ids:
                 violations.append(f"Scene '{scene_id}' depends on non-existent scene: {dep}")
-        
+
         # Check narration
         if not scene.get("narration"):
             violations.append(f"Scene '{scene_id}' missing narration for voice-over")
-    
+
     return violations
 
+
 def repair_plan(
-    user_prompt: str,
-    intent: Optional[UserIntent],
-    plan: AnimationPlan,
-    violations: list[str]
+    user_prompt: str, intent: Optional[UserIntent], plan: AnimationPlan, violations: list[str]
 ) -> AnimationPlan:
     """Repair loop using the correct DSL schema."""
     logger.info(f"Attempting plan repair for violations: {violations}")
-    
+
     repair_prompt = f"""The generated animation plan is invalid. FIX IT.
 USER REQUEST: {user_prompt}
 CURRENT PLAN: {plan.model_dump_json()}

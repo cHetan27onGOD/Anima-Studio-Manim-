@@ -1,44 +1,72 @@
-from typing import Any, Dict, Type, List, Optional
-from app.templates.base import BaseTemplate
-from app.templates.composition import CompositionAwareTemplate, TemplateComposer
-from app.templates.styles import get_style
+from typing import Any, Dict, List, Optional, Type
 
-# Trigonometry
-from app.templates.trigonometry.templates import (
-    UnitCircleTemplate, TrigWavesTemplate, TrigComparisonTemplate
+# Algorithms
+from app.templates.algorithms.templates import (
+    BFSTraversalTemplate,
+    DFSTraversalTemplate,
+    DijkstraTemplate,
+    GraphVisualizationTemplate,
+    SortingTemplate,
+    TopologicalSortTemplate,
 )
+from app.templates.base import BaseTemplate
 
 # Calculus
 from app.templates.calculus.templates import (
-    DerivativeTangentTemplate, IntegralAreaTemplate, GradientDescentTemplate,
-    DerivativeSlopeTemplate, IntegralAccumulationTemplate, ChainRuleTemplate,
-    GradientDescentAdvancedTemplate, PowerRuleTemplate, TaylorSeriesTemplate
+    ChainRuleTemplate,
+    DerivativeSlopeTemplate,
+    DerivativeTangentTemplate,
+    GradientDescentAdvancedTemplate,
+    GradientDescentTemplate,
+    IntegralAccumulationTemplate,
+    IntegralAreaTemplate,
+    PowerRuleTemplate,
+    TaylorSeriesTemplate,
 )
+from app.templates.composition import CompositionAwareTemplate, TemplateComposer
+
+# Generic fallback
+from app.templates.generic import GenericAnimationTemplate
 
 # Linear Algebra
 from app.templates.linear_algebra.templates import (
-    MatrixMultiplicationTemplate, VectorTransformationTemplate, EigenvectorTemplate,
-    DotProductTemplate, BasisChangeTemplate, MatrixMultiplicationCompositionTemplate,
-    EigenvectorCompositionTemplate
+    BasisChangeTemplate,
+    DotProductTemplate,
+    EigenvectorCompositionTemplate,
+    EigenvectorTemplate,
+    MatrixMultiplicationCompositionTemplate,
+    MatrixMultiplicationTemplate,
+    VectorTransformationTemplate,
 )
 
 # Machine Learning
 from app.templates.machine_learning.templates import (
-    NeuralNetworkTemplate, TransformerAttentionTemplate, BackpropagationTemplate,
-    EmbeddingSpaceTemplate, ConvolutionFiltersTemplate
-)
-
-# Algorithms
-from app.templates.algorithms.templates import (
-    BFSTraversalTemplate, GraphVisualizationTemplate, DFSTraversalTemplate,
-    DijkstraTemplate, TopologicalSortTemplate
+    BackpropagationTemplate,
+    ConvolutionFiltersTemplate,
+    EmbeddingSpaceTemplate,
+    MnistRecognitionTemplate,
+    NeuralNetworkTemplate,
+    TransformerAttentionTemplate,
 )
 
 # Primitives
 from app.templates.primitives import (
-    DrawCurveTemplate, PlacePointTemplate, DrawArrowTemplate, 
-    DrawAxisTemplate, WriteTextTemplate, CreateVectorTemplate, 
-    TransformObjectTemplate, HighlightObjectTemplate
+    CreateVectorTemplate,
+    DrawArrowTemplate,
+    DrawAxisTemplate,
+    DrawCurveTemplate,
+    HighlightObjectTemplate,
+    PlacePointTemplate,
+    TransformObjectTemplate,
+    WriteTextTemplate,
+)
+from app.templates.styles import get_style
+
+# Trigonometry
+from app.templates.trigonometry.templates import (
+    TrigComparisonTemplate,
+    TrigWavesTemplate,
+    UnitCircleTemplate,
 )
 
 TEMPLATES: Dict[str, Type[BaseTemplate]] = {
@@ -46,7 +74,6 @@ TEMPLATES: Dict[str, Type[BaseTemplate]] = {
     "unit_circle": UnitCircleTemplate,
     "trig_waves": TrigWavesTemplate,
     "trig_comparison": TrigComparisonTemplate,
-    
     # Calculus
     "derivative_tangent": DerivativeTangentTemplate,
     "integral_area": IntegralAreaTemplate,
@@ -57,7 +84,6 @@ TEMPLATES: Dict[str, Type[BaseTemplate]] = {
     "gradient_descent_advanced": GradientDescentAdvancedTemplate,
     "power_rule": PowerRuleTemplate,
     "taylor_series": TaylorSeriesTemplate,
-    
     # Linear Algebra
     "matrix_multiplication": MatrixMultiplicationTemplate,
     "vector_transformation": VectorTransformationTemplate,
@@ -66,21 +92,20 @@ TEMPLATES: Dict[str, Type[BaseTemplate]] = {
     "basis_change": BasisChangeTemplate,
     "matrix_multiplication_composition": MatrixMultiplicationCompositionTemplate,
     "eigenvector_composition": EigenvectorCompositionTemplate,
-    
     # Machine Learning
     "neural_network": NeuralNetworkTemplate,
     "transformer_attention": TransformerAttentionTemplate,
     "backpropagation": BackpropagationTemplate,
     "embedding_space": EmbeddingSpaceTemplate,
     "convolution_filters": ConvolutionFiltersTemplate,
-    
+    "mnist_recognition": MnistRecognitionTemplate,
     # Algorithms
     "bfs_traversal": BFSTraversalTemplate,
     "graph_visualization": GraphVisualizationTemplate,
     "dfs_traversal": DFSTraversalTemplate,
     "dijkstra": DijkstraTemplate,
     "topological_sort": TopologicalSortTemplate,
-    
+    "sorting": SortingTemplate,
     # Primitives
     "draw_curve": DrawCurveTemplate,
     "place_point": PlacePointTemplate,
@@ -90,37 +115,83 @@ TEMPLATES: Dict[str, Type[BaseTemplate]] = {
     "create_vector": CreateVectorTemplate,
     "transform_object": TransformObjectTemplate,
     "highlight_object": HighlightObjectTemplate,
+    # Generic fallback (must follow the specific ones so overrides are possible)
+    "generic": GenericAnimationTemplate,
 }
 
+
 def get_template(name: str) -> Type[BaseTemplate]:
-    return TEMPLATES.get(name, DrawCurveTemplate)
+    return TEMPLATES.get(name, GenericAnimationTemplate)
+
 
 def render_template(name: str, params: Dict[str, Any], include_header: bool = True) -> str:
     t_cls = get_template(name)
     t = t_cls(params)
     return t.generate_code() if include_header else t.generate_construct_code()
 
+
 def render_composed_scene(scene_id: str, templates: List[str], params: Any) -> str:
     composer = TemplateComposer(scene_id)
     for i, name in enumerate(templates):
         t_cls = get_template(name)
-        p = params[i] if isinstance(params, list) and i < len(params) else (params if isinstance(params, dict) else {})
+        p = (
+            params[i]
+            if isinstance(params, list) and i < len(params)
+            else (params if isinstance(params, dict) else {})
+        )
         if issubclass(t_cls, CompositionAwareTemplate):
             composer.add_template(t_cls(p))
     return composer.compose()
+
+
+_3D_OBJECT_TYPES = {
+    "cube",
+    "box",
+    "rectangular_prism",
+    "sphere",
+    "ball",
+    "cylinder",
+    "cone",
+    "torus",
+    "donut",
+    "prism",
+    "pyramid",
+    "surface",
+    "3d_surface",
+    "parametric_surface",
+    "3d_axes",
+    "threedaxes",
+    "3d_coordinate_system",
+}
+
+
+def _scenes_need_3d(scenes: List[Dict[str, Any]]) -> bool:
+    """Return True if any scene contains a 3D object type."""
+    for s in scenes:
+        for obj in s.get("objects", []):
+            if obj.get("type", "").lower() in _3D_OBJECT_TYPES:
+                return True
+    return False
+
 
 def render_multi_scene_plan(plan: Dict[str, Any]) -> str:
     scenes = plan.get("scenes") or plan.get("parameters", {}).get("scenes", [])
     style_name = plan.get("style", "3b1b")
     style = get_style(style_name)
     bg_color = style["background_color"]
-    
-    code = f"from manim import *\nimport numpy as np\n\nconfig.background_color = '{bg_color}'\n\nclass Scene1(Scene):\n    def construct(self):\n"
+
+    use_3d = _scenes_need_3d(scenes)
+    base_class = "ThreeDScene" if use_3d else "Scene"
+
+    code = f"from manim import *\nimport numpy as np\n\nconfig.background_color = '{bg_color}'\n\nclass Scene1({base_class}):\n    def construct(self):\n"
+    if use_3d:
+        code += "        self.set_camera_orientation(phi=75*DEGREES, theta=-45*DEGREES)\n"
+
     for i, s in enumerate(scenes):
         sid = s.get("scene_id", f"s{i}")
         tmpls = s.get("templates", [])
         params = s.get("parameters", {})
-        
+
         # Inject global style into template parameters
         if isinstance(params, dict):
             params["style"] = style_name
@@ -134,8 +205,11 @@ def render_multi_scene_plan(plan: Dict[str, Any]) -> str:
             # Lines already have indentation, just join them
             code += "\n".join([l for l in sc_code.split("\n") if l.strip()]) + "\n"
         else:
-            tname = s.get("template", "draw_curve")
-            sc_code = render_template(tname, params, False)
+            tname = s.get("template", "generic")
+            # For the generic template, pass the full scene dict so that
+            # GenericAnimationTemplate can access `objects` and `animations`.
+            sc_params = s if tname == "generic" else params
+            sc_code = render_template(tname, sc_params, False)
             code += "\n".join([l for l in sc_code.split("\n") if l.strip()]) + "\n"
         if i < len(scenes) - 1:
             code += "        self.play(FadeOut(*self.mobjects))\n        self.wait(1)\n"
