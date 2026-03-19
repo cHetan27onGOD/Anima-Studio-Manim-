@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
     "3b1b": {
@@ -36,8 +36,9 @@ STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
         "text_color": "WHITE",
         "axis_color": "GREY",
         "font_size": 24,
-    }
+    },
 }
+
 
 def get_style(name: str) -> Dict[str, Any]:
     return STYLE_PRESETS.get(name.lower(), STYLE_PRESETS["3b1b"])

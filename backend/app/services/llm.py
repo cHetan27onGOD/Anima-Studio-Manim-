@@ -899,9 +899,7 @@ def generate_plan(user_prompt: str) -> AnimationPlan:
             if plan.template in {None, "generic"}:
                 plan.template = "transformer_attention"
             plan_params = dict(plan.parameters or {})
-            plan_params.setdefault(
-                "sentence", "The cat chased the mouse because it was hungry."
-            )
+            plan_params.setdefault("sentence", "The cat chased the mouse because it was hungry.")
             plan_params.setdefault("focus_token", "it")
             plan.parameters = plan_params
 

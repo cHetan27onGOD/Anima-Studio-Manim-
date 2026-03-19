@@ -161,10 +161,7 @@ class TransformerAttentionTemplate(BaseTemplate):
             tokens = [str(t).strip() for t in tokens_raw if str(t).strip()]
         else:
             cleaned = (
-                sentence.replace(",", " ,")
-                .replace(".", " .")
-                .replace("?", " ?")
-                .replace("!", " !")
+                sentence.replace(",", " ,").replace(".", " .").replace("?", " ?").replace("!", " !")
             )
             tokens = [t for t in cleaned.split() if t]
 
@@ -179,7 +176,9 @@ class TransformerAttentionTemplate(BaseTemplate):
             focus_idx = normalized.index(requested_focus)
         else:
             pronouns = {"it", "he", "she", "they", "this", "that"}
-            focus_idx = next((i for i, w in enumerate(normalized) if w in pronouns), len(tokens) // 2)
+            focus_idx = next(
+                (i for i, w in enumerate(normalized) if w in pronouns), len(tokens) // 2
+            )
 
         weights_raw = self.parameters.get("attention_weights")
         if isinstance(weights_raw, list) and len(weights_raw) == len(tokens):
@@ -258,7 +257,11 @@ class TransformerAttentionTemplate(BaseTemplate):
         code += f"        self.play(Create(context_box), Write(context_caption), run_time={0.95 * pace_scale:.2f})\n"
         code += "\n"
         code += "        output_box = RoundedRectangle(width=3.8, height=0.9, corner_radius=0.1, color=BLUE_C, fill_opacity=0.15).next_to(context_box, DOWN, buff=0.3)\n"
-        code += "        output_text = Text(f'Updated representation of " + "{tokens[focus_idx]}" + "', font_size=20, color=BLUE_C).move_to(output_box.get_center())\n"
+        code += (
+            "        output_text = Text(f'Updated representation of "
+            + "{tokens[focus_idx]}"
+            + "', font_size=20, color=BLUE_C).move_to(output_box.get_center())\n"
+        )
         code += f"        self.play(TransformFromCopy(token_boxes[focus_idx], output_box), Write(output_text), run_time={0.9 * pace_scale:.2f})\n"
         code += "\n"
         code += "        if detail_level == 'advanced':\n"
