@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional, Type
 
 # Algorithms
 from app.templates.algorithms.templates import (
+    BFSDFSComparisonTemplate,
     BFSTraversalTemplate,
     DFSTraversalTemplate,
     DijkstraTemplate,
@@ -100,6 +101,7 @@ TEMPLATES: Dict[str, Type[BaseTemplate]] = {
     "convolution_filters": ConvolutionFiltersTemplate,
     "mnist_recognition": MnistRecognitionTemplate,
     # Algorithms
+    "bfs_dfs_comparison": BFSDFSComparisonTemplate,
     "bfs_traversal": BFSTraversalTemplate,
     "graph_visualization": GraphVisualizationTemplate,
     "dfs_traversal": DFSTraversalTemplate,
@@ -180,25 +182,72 @@ def render_multi_scene_plan(plan: Dict[str, Any]) -> str:
     style = get_style(style_name)
     bg_color = style["background_color"]
 
+    plan_params = plan.get("parameters", {})
+    if not isinstance(plan_params, dict):
+        plan_params = {}
+    render_profile = plan_params.get("render_profile", {})
+    if not isinstance(render_profile, dict):
+        render_profile = {}
+
+    def _profile_value(key: str, default: Any) -> Any:
+        if key in plan_params:
+            return plan_params.get(key, default)
+        return render_profile.get(key, default)
+
+    quality = str(plan.get("quality", "medium") or "medium").lower()
+    default_fps = 60 if quality == "high" else 30
+    try:
+        frame_rate = int(float(_profile_value("frame_rate", default_fps)))
+        if frame_rate <= 0:
+            frame_rate = default_fps
+    except (TypeError, ValueError):
+        frame_rate = default_fps
+
+    try:
+        inter_scene_wait = float(_profile_value("inter_scene_wait", 1.0))
+    except (TypeError, ValueError):
+        inter_scene_wait = 1.0
+    inter_scene_wait = max(0.0, inter_scene_wait)
+
+    try:
+        transition_fade_duration = float(_profile_value("transition_fade_duration", 0.8))
+    except (TypeError, ValueError):
+        transition_fade_duration = 0.8
+    transition_fade_duration = max(0.0, transition_fade_duration)
+
     use_3d = _scenes_need_3d(scenes)
     base_class = "ThreeDScene" if use_3d else "Scene"
 
-    code = f"from manim import *\nimport numpy as np\n\nconfig.background_color = '{bg_color}'\n\nclass Scene1({base_class}):\n    def construct(self):\n"
+    code = (
+        f"from manim import *\n"
+        f"import numpy as np\n\n"
+        f"config.background_color = '{bg_color}'\n"
+        f"config.frame_rate = {frame_rate}\n\n"
+        f"class Scene1({base_class}):\n"
+        f"    def construct(self):\n"
+    )
     if use_3d:
         code += "        self.set_camera_orientation(phi=75*DEGREES, theta=-45*DEGREES)\n"
 
     for i, s in enumerate(scenes):
         sid = s.get("scene_id", f"s{i}")
         tmpls = s.get("templates", [])
-        params = s.get("parameters", {})
+        raw_params = s.get("parameters", {})
+        params: Any = raw_params
 
         # Inject global style into template parameters
         if isinstance(params, dict):
+            params = dict(params)
             params["style"] = style_name
+            if render_profile:
+                params.setdefault("render_profile", render_profile)
         elif isinstance(params, list):
+            params = [dict(p) if isinstance(p, dict) else p for p in params]
             for p in params:
                 if isinstance(p, dict):
                     p["style"] = style_name
+                    if render_profile:
+                        p.setdefault("render_profile", render_profile)
 
         if tmpls:
             sc_code = render_composed_scene(sid, tmpls, params)
@@ -208,9 +257,22 @@ def render_multi_scene_plan(plan: Dict[str, Any]) -> str:
             tname = s.get("template", "generic")
             # For the generic template, pass the full scene dict so that
             # GenericAnimationTemplate can access `objects` and `animations`.
-            sc_params = s if tname == "generic" else params
+            if tname == "generic":
+                sc_params = dict(s)
+                if render_profile:
+                    sc_params.setdefault("render_profile", render_profile)
+            else:
+                sc_params = params
             sc_code = render_template(tname, sc_params, False)
             code += "\n".join([l for l in sc_code.split("\n") if l.strip()]) + "\n"
         if i < len(scenes) - 1:
-            code += "        self.play(FadeOut(*self.mobjects))\n        self.wait(1)\n"
+            if transition_fade_duration > 0:
+                code += (
+                    f"        self.play(FadeOut(*self.mobjects), "
+                    f"run_time={transition_fade_duration:.2f})\n"
+                )
+            else:
+                code += "        self.play(FadeOut(*self.mobjects))\n"
+            if inter_scene_wait > 0:
+                code += f"        self.wait({inter_scene_wait:.2f})\n"
     return code

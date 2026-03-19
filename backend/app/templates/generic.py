@@ -1,4 +1,5 @@
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict
 
 from app.templates.base import BaseTemplate
 
@@ -16,13 +17,66 @@ def _safe_text(val: Any, default: str = "") -> str:
     if val is None:
         return default
     text = str(val)
-    return text.replace("\\", "\\\\").replace("'", "\\'")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Remove control chars that can break generated source readability.
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", text)
+    return text
+
+
+def _py_literal(val: Any, default: str = "") -> str:
+    """Return a safe Python string literal for generated source code."""
+    return repr(_safe_text(val, default))
+
+
+def _safe_identifier(name: Any, default: str = "obj") -> str:
+    """Create a valid Python identifier from LLM-provided ids."""
+    ident = re.sub(r"[^0-9a-zA-Z_]", "_", str(name or "").strip())
+    ident = re.sub(r"_+", "_", ident).strip("_")
+    if not ident:
+        ident = default
+    if ident[0].isdigit():
+        ident = f"{default}_{ident}"
+    return ident
+
+
+_ACTION_BASE_DURATIONS = {
+    "fade_in": 0.6,
+    "fade_out": 0.6,
+    "write": 1.8,
+    "grow": 1.1,
+    "move": 1.2,
+    "scale": 1.0,
+    "rotate": 1.0,
+    "color": 0.8,
+    "pulse": 0.8,
+    "highlight": 0.8,
+    "indicate": 0.8,
+    "create": 1.2,
+    "draw": 1.2,
+    "show": 1.0,
+    "transform": 1.4,
+    "connect": 1.0,
+    "follow_path": 1.8,
+}
 
 
 class GenericAnimationTemplate(BaseTemplate):
     """Fallback template that interprets general primitives and actions."""
 
     def generate_construct_code(self) -> str:
+        render_profile = self.parameters.get("render_profile", {})
+        if not isinstance(render_profile, dict):
+            render_profile = {}
+
+        pace_scale = _num(
+            render_profile.get("pace_scale", self.parameters.get("pace_scale", 1.0)), 1.0
+        )
+        pace_scale = max(0.5, min(3.0, pace_scale))
+        inter_action_wait = _num(render_profile.get("inter_action_wait", 0.0), 0.0)
+        inter_action_wait = max(0.0, inter_action_wait)
+        scene_pause = _num(render_profile.get("scene_pause", 1.0), 1.0)
+        scene_pause = max(0.0, scene_pause)
+
         # Check if we are rendering a single scene or a list of scenes
         if "objects" in self.parameters or "animations" in self.parameters:
             scenes = [self.parameters]
@@ -39,12 +93,25 @@ class GenericAnimationTemplate(BaseTemplate):
             scene_id = scene.get("scene_id", "scene")
             code += f"        # Scene: {scene_id}\n"
 
+            id_remap: Dict[str, str] = {}
+            existing_ids: set[str] = set()
+
             # Create objects
-            for obj in scene.get("objects", []):
-                obj_id = obj["id"]
-                obj_type_raw = str(obj["type"])
+            for obj_idx, obj in enumerate(scene.get("objects", []), start=1):
+                raw_obj_id = obj.get("id", f"obj_{obj_idx}")
+                base_obj_id = _safe_identifier(raw_obj_id, f"obj_{obj_idx}")
+                obj_id = base_obj_id
+                suffix = 2
+                while obj_id in existing_ids:
+                    obj_id = f"{base_obj_id}_{suffix}"
+                    suffix += 1
+                existing_ids.add(obj_id)
+                id_remap[str(raw_obj_id)] = obj_id
+                id_remap[obj_id] = obj_id
+
+                obj_type_raw = str(obj.get("type", "text"))
                 obj_type = obj_type_raw.strip().lower().replace("-", "_").replace(" ", "_")
-                params = obj.get("parameters", {})
+                params = obj.get("parameters", {}) or {}
 
                 if obj_type == "circle":
                     radius = _num(params.get("radius"), 1.0)
@@ -76,19 +143,19 @@ class GenericAnimationTemplate(BaseTemplate):
                 elif obj_type == "dot":
                     code += f"        {obj_id} = Dot(color=WHITE)\n"
                 elif obj_type in ("text", "label"):
-                    text = _safe_text(params.get("text", params.get("label", "")))
+                    text_lit = _py_literal(params.get("text", params.get("label", "")))
                     font_size = params.get("font_size", 32)
-                    code += f"        {obj_id} = Text(r'{text}', font_size={font_size})\n"
+                    code += f"        {obj_id} = Text({text_lit}, font_size={font_size})\n"
                 elif obj_type in ("math_tex", "mathtex", "latex", "formula", "equation"):
-                    expr = params.get("expression", params.get("text", "x")).replace("\\", "\\\\")
-                    code += f"        {obj_id} = MathTex(r'{expr}')\n"
+                    expr_lit = _py_literal(params.get("expression", params.get("text", "x")), "x")
+                    code += f"        {obj_id} = MathTex({expr_lit})\n"
                 elif obj_type in ("matrix", "determinant"):
                     entries = params.get("entries")
                     latex = params.get("latex", params.get("expression"))
                     if isinstance(entries, list):
                         code += f"        {obj_id} = Matrix({entries})\n"
                     elif latex:
-                        code += f"        {obj_id} = MathTex(r'{_safe_text(latex)}')\n"
+                        code += f"        {obj_id} = MathTex({_py_literal(latex)})\n"
                     else:
                         code += f"        {obj_id} = Matrix([[1, 2], [3, 4]])\n"
                 elif obj_type == "vector":
@@ -144,37 +211,39 @@ class GenericAnimationTemplate(BaseTemplate):
                     expr = params.get("expression", "np.sin(u) * np.cos(v)")
                     code += f"        {obj_id} = Surface(\n"
                     code += f"            lambda u, v: np.array([u, v, {expr}]),\n"
-                    code += f"            u_range=[-PI, PI], v_range=[-PI, PI],\n"
-                    code += f"            resolution=(15, 15)\n"
-                    code += f"        )\n"
+                    code += "            u_range=[-PI, PI], v_range=[-PI, PI],\n"
+                    code += "            resolution=(15, 15)\n"
+                    code += "        )\n"
                     code += f"        {obj_id}.set_style(fill_opacity=0.7)\n"
                 elif obj_type in ("image", "mnist_image", "digit_image"):
-                    label = _safe_text(params.get("label", params.get("text", "Image")), "Image")
+                    label_lit = _py_literal(
+                        params.get("label", params.get("text", "Image")), "Image"
+                    )
                     code += f"        {obj_id}_frame = RoundedRectangle(width=2.2, height=2.2, corner_radius=0.15, color=BLUE_C, fill_opacity=0.2)\n"
-                    code += f"        {obj_id}_label = Text(r'{label}', font_size=20)\n"
+                    code += f"        {obj_id}_label = Text({label_lit}, font_size=20)\n"
                     code += f"        {obj_id}_label.move_to({obj_id}_frame.get_center())\n"
                     code += f"        {obj_id} = VGroup({obj_id}_frame, {obj_id}_label)\n"
                 elif obj_type in ("token", "word", "subword"):
-                    token_text = _safe_text(
+                    token_text_lit = _py_literal(
                         params.get("text", params.get("token", "token")), "token"
                     )
                     code += f"        {obj_id}_box = RoundedRectangle(width=1.8, height=0.7, corner_radius=0.1, color=TEAL, fill_opacity=0.2)\n"
-                    code += f"        {obj_id}_label = Text(r'{token_text}', font_size=20)\n"
+                    code += f"        {obj_id}_label = Text({token_text_lit}, font_size=20)\n"
                     code += f"        {obj_id}_label.move_to({obj_id}_box.get_center())\n"
                     code += f"        {obj_id} = VGroup({obj_id}_box, {obj_id}_label)\n"
                 elif obj_type in ("state", "markov_state", "node", "graph_node"):
-                    label = _safe_text(params.get("label", params.get("text", obj_id)), obj_id)
+                    label_lit = _py_literal(params.get("label", params.get("text", obj_id)), obj_id)
                     code += f"        {obj_id}_node = Circle(radius=0.45, color=BLUE)\n"
-                    code += f"        {obj_id}_label = Text(r'{label}', font_size=20).move_to({obj_id}_node.get_center())\n"
+                    code += f"        {obj_id}_label = Text({label_lit}, font_size=20).move_to({obj_id}_node.get_center())\n"
                     code += f"        {obj_id} = VGroup({obj_id}_node, {obj_id}_label)\n"
                 elif obj_type == "neural_network":
                     layers = params.get("layers", [4, 5, 3])
                     code += f"        {obj_id} = VGroup()\n"
                     code += f"        _layer_sizes = {layers}\n"
-                    code += f"        for _li, _size in enumerate(_layer_sizes):\n"
-                    code += f"            _layer = VGroup(*[Circle(radius=0.14, color=BLUE_C, stroke_width=2) for _ in range(int(_size))])\n"
-                    code += f"            _layer.arrange(DOWN, buff=0.2)\n"
-                    code += f"            _layer.move_to([_li * 1.4 - (len(_layer_sizes)-1)*0.7, 0, 0])\n"
+                    code += "        for _li, _size in enumerate(_layer_sizes):\n"
+                    code += "            _layer = VGroup(*[Circle(radius=0.14, color=BLUE_C, stroke_width=2) for _ in range(int(_size))])\n"
+                    code += "            _layer.arrange(DOWN, buff=0.2)\n"
+                    code += "            _layer.move_to([_li * 1.4 - (len(_layer_sizes)-1)*0.7, 0, 0])\n"
                     code += f"            {obj_id}.add(_layer)\n"
                 elif obj_type == "backpropagation":
                     code += f"        {obj_id}_arrow = Arrow(RIGHT*2.2, LEFT*2.2, color=RED)\n"
@@ -183,65 +252,136 @@ class GenericAnimationTemplate(BaseTemplate):
                 else:
                     # Catch-all: create a labelled text so animations don't NameError
                     fallback_label = obj_type_raw.replace("_", " ").title()
-                    code += f"        {obj_id} = Text('{_safe_text(fallback_label)}', font_size=28)  # fallback for type '{obj_type_raw}'\n"
+                    code += f"        {obj_id} = Text({_py_literal(fallback_label)}, font_size=28)  # fallback for type '{obj_type_raw}'\n"
 
                 # Set initial position
                 pos = params.get("position", [0, 0, 0])
                 code += f"        {obj_id}.move_to({pos})\n"
 
             # Run animations
-            for anim in scene.get("animations", []):
-                obj_id = anim["object_id"]
-                action = str(anim["action"]).strip().lower().replace("-", "_")
-                params = anim.get("parameters", {})
+            for anim_idx, anim in enumerate(scene.get("animations", []), start=1):
+                raw_anim_obj = str(anim.get("object_id", f"auto_obj_{anim_idx}"))
+                obj_id = id_remap.get(raw_anim_obj)
+                if not obj_id:
+                    base_obj_id = _safe_identifier(raw_anim_obj, f"auto_obj_{anim_idx}")
+                    obj_id = base_obj_id
+                    suffix = 2
+                    while obj_id in existing_ids:
+                        obj_id = f"{base_obj_id}_{suffix}"
+                        suffix += 1
+                    existing_ids.add(obj_id)
+                    id_remap[raw_anim_obj] = obj_id
+
+                    # Synthesize a safe placeholder object so this animation can still run.
+                    placeholder_lit = _py_literal(
+                        raw_anim_obj.replace("_", " ").title() or "Concept"
+                    )
+                    code += f"        {obj_id} = Text({placeholder_lit}, font_size=26)\n"
+
+                action = str(anim.get("action", "fade_in")).strip().lower().replace("-", "_")
+                params = anim.get("parameters", {}) or {}
+                explicit_duration = _num(anim.get("duration"), 0.0)
+                base_duration = (
+                    explicit_duration
+                    if explicit_duration > 0
+                    else _ACTION_BASE_DURATIONS.get(action, 1.0)
+                )
+                run_time = max(0.2, base_duration * pace_scale)
 
                 if action in ("fade_in", "appear", "show_up", "reveal"):
-                    code += f"        self.play(FadeIn({obj_id}))\n"
+                    code += f"        self.play(FadeIn({obj_id}), run_time={run_time:.2f})\n"
                 elif action in ("fade_out", "disappear", "hide"):
-                    code += f"        self.play(FadeOut({obj_id}))\n"
+                    code += f"        self.play(FadeOut({obj_id}), run_time={run_time:.2f})\n"
                 elif action == "write":
-                    code += f"        self.play(Write({obj_id}))\n"
+                    code += f"        self.play(Write({obj_id}), run_time={run_time:.2f})\n"
                 elif action == "grow":
-                    code += f"        self.play(GrowFromCenter({obj_id}))\n"
+                    code += (
+                        f"        self.play(GrowFromCenter({obj_id}), run_time={run_time:.2f})\n"
+                    )
                 elif action == "move":
                     to_pos = params.get("to", [2, 0, 0])
-                    code += f"        self.play({obj_id}.animate.move_to({to_pos}))\n"
+                    code += f"        self.play({obj_id}.animate.move_to({to_pos}), run_time={run_time:.2f})\n"
                 elif action == "scale":
                     factor = params.get("factor", 2.0)
-                    code += f"        self.play({obj_id}.animate.scale({factor}))\n"
+                    code += (
+                        f"        self.play({obj_id}.animate.scale({factor}), "
+                        f"run_time={run_time:.2f})\n"
+                    )
                 elif action == "rotate":
                     angle = params.get("angle", 90)
-                    code += f"        self.play(Rotate({obj_id}, angle={angle}*DEGREES))\n"
+                    code += (
+                        f"        self.play(Rotate({obj_id}, angle={angle}*DEGREES), "
+                        f"run_time={run_time:.2f})\n"
+                    )
                 elif action == "color":
                     new_color = params.get("color", "YELLOW")
-                    code += f"        self.play({obj_id}.animate.set_color({new_color}))\n"
+                    code += (
+                        f"        self.play({obj_id}.animate.set_color({new_color}), "
+                        f"run_time={run_time:.2f})\n"
+                    )
                 elif action in ("pulse", "highlight", "indicate"):
-                    code += f"        self.play(Indicate({obj_id}))\n"
+                    code += f"        self.play(Indicate({obj_id}), run_time={run_time:.2f})\n"
                 elif action in ("create", "draw", "show"):
-                    code += f"        self.play(Create({obj_id}))\n"
+                    code += f"        self.play(Create({obj_id}), run_time={run_time:.2f})\n"
                 elif action == "wait":
-                    duration = params.get("duration", 1)
-                    code += f"        self.wait({duration})\n"
+                    duration = _num(params.get("duration", run_time), run_time)
+                    code += f"        self.wait({max(0.0, duration):.2f})\n"
                 elif action == "transform":
                     target_id = params.get("target")
                     if target_id:
-                        code += f"        self.play(ReplacementTransform({obj_id}, {target_id}))\n"
+                        raw_target_id = str(target_id)
+                        target_id = id_remap.get(
+                            raw_target_id, _safe_identifier(raw_target_id, f"target_{anim_idx}")
+                        )
+                        if target_id not in existing_ids:
+                            existing_ids.add(target_id)
+                            id_remap[raw_target_id] = target_id
+                            target_label_lit = _py_literal(
+                                raw_target_id.replace("_", " ").title() or "Target"
+                            )
+                            code += (
+                                f"        {target_id} = Text({target_label_lit}, font_size=24)\n"
+                            )
+                        code += (
+                            f"        self.play(ReplacementTransform({obj_id}, {target_id}), "
+                            f"run_time={run_time:.2f})\n"
+                        )
                 elif action == "connect":
                     target_id = params.get("target")
                     if target_id:
+                        raw_target_id = str(target_id)
+                        target_id = id_remap.get(
+                            raw_target_id, _safe_identifier(raw_target_id, f"target_{anim_idx}")
+                        )
+                        if target_id not in existing_ids:
+                            existing_ids.add(target_id)
+                            id_remap[raw_target_id] = target_id
+                            target_label_lit = _py_literal(
+                                raw_target_id.replace("_", " ").title() or "Target"
+                            )
+                            code += (
+                                f"        {target_id} = Text({target_label_lit}, font_size=24)\n"
+                            )
                         line_id = f"{obj_id}_{target_id}_edge"
                         code += f"        {line_id} = Line({obj_id}.get_center(), {target_id}.get_center(), color=GRAY)\n"
-                        code += f"        self.play(Create({line_id}))\n"
+                        code += f"        self.play(Create({line_id}), run_time={run_time:.2f})\n"
                 elif action == "follow_path":
                     path_type = params.get("path", "circle")
                     if path_type == "circle":
-                        code += f"        path = Circle(radius=2)\n"
-                        code += f"        self.play(MoveAlongPath({obj_id}, path))\n"
+                        code += "        path = Circle(radius=2)\n"
+                        code += (
+                            f"        self.play(MoveAlongPath({obj_id}, path), "
+                            f"run_time={run_time:.2f})\n"
+                        )
                 else:
                     # Unknown action: default to FadeIn so we don't silently skip
                     code += (
-                        f"        self.play(FadeIn({obj_id}))  # fallback for action '{action}'\n"
+                        f"        self.play(FadeIn({obj_id}), run_time={run_time:.2f})  "
+                        f"# fallback for action '{action}'\n"
                     )
 
-            code += "        self.wait(1)\n"
+                if action != "wait" and inter_action_wait > 0:
+                    code += f"        self.wait({inter_action_wait:.2f})\n"
+
+            code += f"        self.wait({scene_pause:.2f})\n"
         return code

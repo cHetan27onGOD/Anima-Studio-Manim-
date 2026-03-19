@@ -11,12 +11,12 @@ STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
         "font_size": 24,
     },
     "modern": {
-        "background_color": "#ffffff",
+        "background_color": "#000000",
         "primary_color": "#2563eb",  # Modern blue
         "secondary_color": "#db2777",  # Modern pink
         "accent_color": "#10b981",  # Modern green
-        "text_color": "#1e293b",
-        "axis_color": "#94a3b8",
+        "text_color": "#f1f5f9",
+        "axis_color": "#64748b",
         "font_size": 28,
     },
     "minimalist": {

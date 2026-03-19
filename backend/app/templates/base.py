@@ -1,19 +1,30 @@
+import json
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
-import json
+
 from app.templates.styles import get_style
+
 
 class BaseTemplate(ABC):
     """Base class for all Manim animation templates."""
-    
+
     def __init__(self, parameters: Dict[str, Any]):
         self.parameters = parameters
         self.scene_name = "Scene1"
-        
+
         # Apply style preset
         style_name = parameters.get("style", "3b1b")
         self.style = get_style(style_name)
         self.background_color = self.style["background_color"]
+
+    def get_render_param(self, key: str, default: Any = None) -> Any:
+        """Resolve rendering parameter from direct params first, then render_profile."""
+        if key in self.parameters:
+            return self.parameters.get(key)
+        render_profile = self.parameters.get("render_profile", {})
+        if isinstance(render_profile, dict):
+            return render_profile.get(key, default)
+        return default
 
     def get_style_param(self, key: str, default: Any = None) -> Any:
         """Helper to get a style parameter, prioritizing manual template overrides."""
@@ -32,7 +43,23 @@ class BaseTemplate(ABC):
         return code
 
     def get_header(self) -> str:
-        return f"from manim import *\nimport numpy as np\n\nconfig.background_color = '{self.background_color}'\n\n"
+        header = (
+            f"from manim import *\n"
+            f"import numpy as np\n\n"
+            f"config.background_color = '{self.background_color}'\n"
+        )
+
+        frame_rate = self.get_render_param("frame_rate")
+        if frame_rate is not None:
+            try:
+                frame_rate_int = int(float(frame_rate))
+                if frame_rate_int > 0:
+                    header += f"config.frame_rate = {frame_rate_int}\n"
+            except (TypeError, ValueError):
+                pass
+
+        header += "\n"
+        return header
 
     def get_class_def(self, base_class: str = "Scene") -> str:
         return f"class {self.scene_name}({base_class}):\n    def construct(self):\n"
