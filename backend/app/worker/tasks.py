@@ -1,3 +1,4 @@
+import ast
 import re
 import subprocess
 import tempfile
@@ -97,6 +98,25 @@ def generate_manim_code_from_plan(plan: AnimationPlan) -> str:
     # For generic fallback, pass the whole plan dict
     template_params = plan.parameters if plan.template != "generic" else plan.model_dump()
     return render_template(plan.template or "generic", template_params)
+
+
+def validate_manim_code(code: str) -> List[str]:
+    """Stage 6 — Code Validator.
+
+    Runs ast.parse() on the generated Manim Python code before sending it
+    to Docker. Catches syntax errors instantly (< 1 ms) vs. waiting 30-120s
+    for Docker to fail.
+
+    Returns:
+        List of error strings (empty = valid syntax)
+    """
+    try:
+        ast.parse(code)
+        return []
+    except SyntaxError as e:
+        return [f"SyntaxError at line {e.lineno}: {e.msg} — {e.text!r}"]
+    except Exception as e:
+        return [f"Parse error: {e}"]
 
 
 async def update_job_status(job_id: str, status: JobStatus, **kwargs):
@@ -300,16 +320,28 @@ async def render_graph_async(job_id: str):
             manim_code = render_multi_scene_plan(plan.model_dump())
         else:
             # Fallback to direct code generation or custom DSL interpreter
-            logs.append("No template matched. Falling back to direct plan generation...")
-            publish_log(job_id, "Generating custom Manim logic...")
-            manim_code = generate_manim_code(prompt)
+            logs.append("No template matched. Falling back to direct LLM Stage 6 generation...")
+            publish_log(job_id, "Generating custom Manim logic via LLM...")
+            from app.services.llm import generate_manim_code_llm
+            manim_code = generate_manim_code_llm(plan)
+            if not manim_code:
+                raise ValueError("Stage 6 LLM failed to generate valid Manim code.")
 
         await update_job_status(job_id, JobStatus.RUNNING, progress=50)
 
         def _detect_scene_class(code: str) -> str:
-            m = re.search(r"class\\s+(\\w+)\\s*\\((?:Scene|GraphScene|ThreeDScene)\\)\\s*:", code)
+            # Fixed: was double-escaped so it never matched, always returning "Scene1"
+            m = re.search(r"class\s+(\w+)\s*\((?:Scene|GraphScene|ThreeDScene)\)\s*:", code)
             return m.group(1) if m else "Scene1"
         scene_class = _detect_scene_class(manim_code)
+
+        # ── Stage 6: Code Validator ────────────────────────────────────────
+        syntax_errors = validate_manim_code(manim_code)
+        if syntax_errors:
+            error_detail = "; ".join(syntax_errors)
+            logs.append(f"Stage 6 Code Validator: {error_detail}")
+            publish_log(job_id, f"Syntax error in generated code: {error_detail}")
+            raise Exception(f"Generated Manim code has syntax errors: {error_detail}")
 
         # Create temp file for scene
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:

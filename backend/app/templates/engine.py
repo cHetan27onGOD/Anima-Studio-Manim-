@@ -50,6 +50,18 @@ from app.templates.machine_learning.templates import (
     TransformerAttentionTemplate,
 )
 
+# Algorithms
+from app.templates.algorithms.templates import (
+    BFSDFSComparisonTemplate,
+    BFSTraversalTemplate,
+    BinarySearchTreeTemplate,
+    DFSTraversalTemplate,
+    DijkstraTemplate,
+    GraphVisualizationTemplate,
+    SortingTemplate,
+    TopologicalSortTemplate,
+)
+
 # Primitives
 from app.templates.primitives import (
     CreateVectorTemplate,
@@ -108,6 +120,7 @@ TEMPLATES: Dict[str, Type[BaseTemplate]] = {
     "dijkstra": DijkstraTemplate,
     "topological_sort": TopologicalSortTemplate,
     "sorting": SortingTemplate,
+    "binary_search_tree": BinarySearchTreeTemplate,
     # Primitives
     "draw_curve": DrawCurveTemplate,
     "place_point": PlacePointTemplate,
@@ -124,7 +137,6 @@ TEMPLATES: Dict[str, Type[BaseTemplate]] = {
 
 def get_template(name: str) -> Type[BaseTemplate]:
     return TEMPLATES.get(name, GenericAnimationTemplate)
-
 
 def render_template(name: str, params: Dict[str, Any], include_header: bool = True) -> str:
     t_cls = get_template(name)
@@ -265,14 +277,22 @@ def render_multi_scene_plan(plan: Dict[str, Any]) -> str:
                 sc_params = params
             sc_code = render_template(tname, sc_params, False)
             code += "\n".join([l for l in sc_code.split("\n") if l.strip()]) + "\n"
+        
+        # Smart transition: Only FadeOut if the NEXT scene doesn't depend on this one
         if i < len(scenes) - 1:
-            if transition_fade_duration > 0:
-                code += (
-                    f"        self.play(FadeOut(*self.mobjects), "
-                    f"run_time={transition_fade_duration:.2f})\n"
-                )
+            next_scene = scenes[i+1]
+            deps = next_scene.get("depends_on", [])
+            if sid not in deps:
+                if transition_fade_duration > 0:
+                    code += (
+                        f"        self.play(FadeOut(*self.mobjects), "
+                        f"run_time={transition_fade_duration:.2f})\n"
+                    )
+                else:
+                    code += "        self.play(FadeOut(*self.mobjects))\n"
+                
+                if inter_scene_wait > 0:
+                    code += f"        self.wait({inter_scene_wait:.2f})\n"
             else:
-                code += "        self.play(FadeOut(*self.mobjects))\n"
-            if inter_scene_wait > 0:
-                code += f"        self.wait({inter_scene_wait:.2f})\n"
+                code += "        self.wait(0.5)  # Brief pause between linked scenes\n"
     return code

@@ -3,65 +3,66 @@ import numpy as np
 from app.templates.base import BaseTemplate
 from app.templates.composition import CompositionAwareTemplate, CompositionContext
 
-class MatrixMultiplicationTemplate(BaseTemplate):
+class MatrixMultiplicationTemplate(CompositionAwareTemplate):
     """Template for 3Blue1Brown style Matrix Multiplication animations."""
-    
-    def generate_construct_code(self) -> str:
+    def compose(self, context: CompositionContext) -> None:
         matrix_a = self.parameters.get("matrix_a", [[1, 2], [3, 4]])
         matrix_b = self.parameters.get("matrix_b", [[5, 6], [7, 8]])
         
-        code = f"        # 3B1B Matrix Multiplication Pattern\n"
-        code += f"        matrix_a_val = {matrix_a}\n"
-        code += f"        matrix_b_val = {matrix_b}\n"
-        code += f"        \n"
-        code += f"        m1 = Matrix(matrix_a_val).scale(0.8)\n"
-        code += f"        m2 = Matrix(matrix_b_val).scale(0.8)\n"
-        code += f"        equals = MathTex('=')\n"
-        code += f"        \n"
-        code += f"        # Calculate result matrix\n"
-        code += f"        import numpy as np\n"
-        code += f"        res_val = np.dot(np.array(matrix_a_val), np.array(matrix_b_val)).tolist()\n"
-        code += f"        m3 = Matrix(res_val).scale(0.8)\n"
-        code += f"        \n"
-        code += f"        group = VGroup(m1, m2, equals, m3).arrange(RIGHT, buff=0.5).center()\n"
-        code += f"        \n"
-        code += f"        self.play(Write(m1), Write(m2))\n"
-        code += f"        self.wait(1)\n"
-        code += f"        self.play(Write(equals), Write(m3))\n"
-        code += f"        self.wait(2)\n"
+        # Calculation
+        import numpy as np
+        matrix_a_val = matrix_a
+        matrix_b_val = matrix_b
+        res_val = np.dot(np.array(matrix_a_val), np.array(matrix_b_val)).tolist()
         
-        # Step-by-step highlight logic (Knowledge-based improvement)
-        code += f"        # Highlight rows and columns for pedagogical clarity\n"
-        code += f"        for i in range(len(matrix_a_val)):\n"
-        code += f"            for j in range(len(matrix_b_val[0])):\n"
-        code += f"                row_rect = SurroundingRectangle(m1.get_rows()[i], color=YELLOW)\n"
-        code += f"                col_rect = SurroundingRectangle(m2.get_columns()[j], color=BLUE)\n"
-        code += f"                res_cell = SurroundingRectangle(m3.get_entries()[i*len(matrix_b_val[0]) + j], color=GREEN)\n"
-        code += f"                \n"
-        code += f"                # Show calculation label (e.g., 3*5 + 4*3 = 27)\n"
-        code += f"                calc_str = ' + '.join([f'{{matrix_a_val[i][k]}}*{{matrix_b_val[k][j]}}' for k in range(len(matrix_a_val[0]))])\n"
-        code += f"                calc_val = res_val[i][j]\n"
-        code += f"                calc_tex = MathTex(f'{{calc_str}} = {{calc_val}}', font_size=24, color=WHITE).to_edge(DOWN, buff=1)\n"
-        code += f"                \n"
-        code += f"                self.play(Create(row_rect), Create(col_rect))\n"
-        code += f"                self.play(Write(calc_tex), Create(res_cell))\n"
-        code += f"                self.wait(1)\n"
-        code += f"                self.play(FadeOut(row_rect), FadeOut(col_rect), FadeOut(res_cell), FadeOut(calc_tex))\n"
+        # Setup Objects
+        context.add_obj("m1", "matrix", f"        m1 = Matrix({matrix_a_val}).scale(0.8)\n")
+        context.add_obj("m2", "matrix", f"        m2 = Matrix({matrix_b_val}).scale(0.8)\n")
+        context.add_obj("equals", "label", "        equals = MathTex('=')\n")
+        context.add_obj("m3", "matrix", f"        m3 = Matrix({res_val}).scale(0.8)\n")
         
-        return code
+        # Layout
+        context.add_anim("        group = VGroup(m1, m2, equals, m3).arrange(RIGHT, buff=0.5).center()\n")
+        
+        # Initial Animation
+        context.add_anim("        self.play(Write(m1), Write(m2))\n")
+        context.add_anim("        self.wait(1)\n")
+        context.add_anim("        self.play(Write(equals), Write(m3))\n")
+        context.add_anim("        self.wait(2)\n")
+        
+        # Step-by-step highlight logic
+        step_code = (
+            f"        for i in range(len({matrix_a_val})):\n"
+            f"            for j in range(len({matrix_b_val}[0])):\n"
+            "                row_rect = SurroundingRectangle(m1.get_rows()[i], color=YELLOW)\n"
+            "                col_rect = SurroundingRectangle(m2.get_columns()[j], color=BLUE)\n"
+            f"                res_cell = SurroundingRectangle(m3.get_entries()[i*len({matrix_b_val}[0]) + j], color=GREEN)\n"
+            "                \n"
+            "                # Show calculation label\n"
+            f"                calc_str = ' + '.join([f'{{{matrix_a_val}[i][k]}}*{{{matrix_b_val}[k][j]}}' for k in range(len({matrix_a_val}[0]))])\n"
+            f"                calc_val = {res_val}[i][j]\n"
+            "                calc_tex = MathTex(f'{calc_str} = {calc_val}', font_size=24, color=WHITE).to_edge(DOWN, buff=1)\n"
+            "                \n"
+            "                self.play(Create(row_rect), Create(col_rect))\n"
+            "                self.play(Write(calc_tex), Create(res_cell))\n"
+            "                self.wait(1)\n"
+            "                self.play(FadeOut(row_rect), FadeOut(col_rect), FadeOut(res_cell), FadeOut(calc_tex))\n"
+        )
+        context.add_anim(step_code)
 
-class VectorTransformationTemplate(BaseTemplate):
+class VectorTransformationTemplate(CompositionAwareTemplate):
     """Template for 3Blue1Brown style Linear Transformation animations."""
-    
-    def generate_construct_code(self) -> str:
+    def compose(self, context: CompositionContext) -> None:
         matrix = self.parameters.get("matrix", [[2, 1], [1, 2]])
-        code = f"        # Linear Transformation Pattern\n"
-        code += f"        ax = NumberPlane()\n"
-        code += f"        matrix = {matrix}\n"
-        code += f"        self.play(Create(ax))\n"
-        code += f"        self.play(ax.animate.apply_matrix(matrix), run_time=3)\n"
-        code += f"        self.wait(2)\n"
-        return code
+        
+        # Setup Axes
+        if not context.object_exists("axes"):
+            context.add_obj("axes", "axes", "        ax = NumberPlane()\n")
+        
+        # Animations
+        context.add_anim("        self.play(Create(ax))\n")
+        context.add_anim(f"        self.play(ax.animate.apply_matrix({matrix}), run_time=3)\n")
+        context.add_anim("        self.wait(2)\n")
 
 class EigenvectorTemplate(CompositionAwareTemplate):
     """Template for showing eigenvectors and matrix transformations with equations."""

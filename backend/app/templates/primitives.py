@@ -16,10 +16,10 @@ class DrawCurveTemplate(CompositionAwareTemplate):
         
         if not context.object_exists("axes"):
             context.add_obj("axes", "axes", f"        ax = Axes(x_range={x_range}, y_range={y_range}, axis_config={{'include_tip': True}})\n")
-        context.add_obj(obj_id, "curve", f"        {obj_id} = ax.plot(lambda x: {expr}, color={color})\n")
+        context.add_obj(obj_id, "curve", f"        {obj_id} = ax.plot(lambda x: {expr}, color='{color}')\n")
         label_text = self.parameters.get("label")
         if label_text:
-            context.add_obj(f"{obj_id}_label", "label", f"        {obj_id}_label = MathTex(r'{label_text}', color={color}).next_to({obj_id}, UP)\n")
+            context.add_obj(f"{obj_id}_label", "label", f"        {obj_id}_label = MathTex(r'{label_text}', color='{color}').next_to({obj_id}, UP)\n")
             context.add_anim(f"        self.play(Create({obj_id}), Write({obj_id}_label))\n")
         else:
             context.add_anim(f"        self.play(Create({obj_id}))\n")
@@ -34,7 +34,7 @@ class PlacePointTemplate(CompositionAwareTemplate):
         except: x_val = 0
         y_expr = self.parameters.get("y_expression", f"{x_val}**2")
         color = self.parameters.get("color", "YELLOW")
-        context.add_obj("point", "dot", f"        point = Dot(ax.c2p({x_val}, {y_expr}), color={color})\n")
+        context.add_obj("point", "dot", f"        point = Dot(ax.c2p({x_val}, {y_expr}), color='{color}')\n")
         context.add_anim("        self.play(FadeIn(point))\n")
 
 class DrawArrowTemplate(CompositionAwareTemplate):
@@ -44,7 +44,7 @@ class DrawArrowTemplate(CompositionAwareTemplate):
         if isinstance(start, str): start = eval(start)
         if isinstance(end, str): end = eval(end)
         color = self.parameters.get("color", "GOLD")
-        context.add_obj("arrow", "arrow", f"        arrow = Arrow({start}, {end}, color={color})\n")
+        context.add_obj("arrow", "arrow", f"        arrow = Arrow({start}, {end}, color='{color}')\n")
         context.add_anim("        self.play(GrowArrow(arrow))\n")
 
 class DrawAxisTemplate(CompositionAwareTemplate):
@@ -70,7 +70,7 @@ class CreateVectorTemplate(CompositionAwareTemplate):
             context.add_obj("axes", "axes", "        ax = Axes()\n")
         coords = self.parameters.get("coords", [1, 1, 0])
         color = self.parameters.get("color", "YELLOW")
-        context.add_obj("vector", "vector", f"        vec = Vector({coords}, color={color})\n")
+        context.add_obj("vector", "vector", f"        vec = Vector({coords}, color='{color}')\n")
         context.add_anim("        self.play(GrowArrow(vec))\n")
 
 class TransformObjectTemplate(CompositionAwareTemplate):

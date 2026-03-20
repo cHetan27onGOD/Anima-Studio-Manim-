@@ -6,113 +6,121 @@ from app.templates.composition import CompositionAwareTemplate, CompositionConte
 PI = np.pi
 TAU = 2 * PI
 
-class DerivativeTangentTemplate(BaseTemplate):
+class DerivativeTangentTemplate(CompositionAwareTemplate):
     """Template for showing the derivative as a tangent line moving along a curve."""
-    
-    def generate_construct_code(self) -> str:
+    def compose(self, context: CompositionContext) -> None:
         expression = self.parameters.get("expression", "x**2")
         primary_color = self.get_style_param("primary_color", "BLUE")
         accent_color = self.get_style_param("accent_color", "YELLOW")
         axis_color = self.get_style_param("axis_color", "GREY")
         
-        code = f"        # Derivative & Tangent Pattern\n"
-        code += f"        ax = Axes(x_range=[-3, 3], y_range=[-1, 9], axis_config={{'include_tip': True, 'color': '{axis_color}'}})\n"
-        code += f"        curve = ax.plot(lambda x: {expression}, color='{primary_color}')\n"
-        code += f"        \n"
-        code += f"        t = ValueTracker(-2)\n"
-        code += f"        dot = always_redraw(lambda: Dot(color='{accent_color}').move_to(ax.c2p(t.get_value(), t.get_value()**2)))\n"
-        code += f"        tangent = always_redraw(lambda: ax.get_tangent_line(t.get_value(), curve, length=4, color='{accent_color}'))\n"
-        code += f"        \n"
-        code += f"        self.play(Create(ax), Create(curve))\n"
-        code += f"        self.play(FadeIn(dot), Create(tangent))\n"
-        code += f"        self.play(t.animate.set_value(2), run_time=4, rate_func=linear)\n"
-        code += f"        self.wait(2)\n"
-        return code
+        # Setup Axes
+        if not context.object_exists("axes"):
+            context.add_obj("axes", "axes", f"        ax = Axes(x_range=[-3, 3], y_range=[-1, 9], axis_config={{'include_tip': True, 'color': '{axis_color}'}})\n")
+        
+        # Setup Curve
+        context.add_obj("curve", "curve", f"        curve = ax.plot(lambda x: {expression}, color='{primary_color}')\n")
+        
+        # Setup Tracker and Dynamic Elements
+        context.add_obj("t", "tracker", "        t = ValueTracker(-2)\n")
+        context.add_obj("dot", "dot", f"        dot = always_redraw(lambda: Dot(color='{accent_color}').move_to(ax.c2p(t.get_value(), t.get_value()**2, 0)))\n")
+        context.add_obj("tangent", "line", f"        tangent = always_redraw(lambda: ax.get_tangent_line(t.get_value(), curve, length=4, color='{accent_color}'))\n")
+        
+        # Animations
+        context.add_anim("        self.play(Create(ax), Create(curve))\n")
+        context.add_anim("        self.play(FadeIn(dot), Create(tangent))\n")
+        context.add_anim("        self.play(t.animate.set_value(2), run_time=4, rate_func=linear)\n")
+        context.add_anim("        self.wait(2)\n")
 
-class IntegralAreaTemplate(BaseTemplate):
+class IntegralAreaTemplate(CompositionAwareTemplate):
     """Template for showing the integral as the area under a curve."""
-    
-    def generate_construct_code(self) -> str:
+    def compose(self, context: CompositionContext) -> None:
         expression = self.parameters.get("expression", "x**2")
         x_range = self.parameters.get("x_range", [0, 2])
         primary_color = self.get_style_param("primary_color", "BLUE")
         accent_color = self.get_style_param("accent_color", "TEAL")
         axis_color = self.get_style_param("axis_color", "GREY")
         
-        code = f"        # Integral & Area Pattern\n"
-        code += f"        ax = Axes(x_range=[-1, 3], y_range=[-1, 9], axis_config={{'color': '{axis_color}'}})\n"
-        code += f"        curve = ax.plot(lambda x: {expression}, color='{primary_color}')\n"
-        code += f"        area = ax.get_area(curve, x_range={x_range}, color='{accent_color}', opacity=0.5)\n"
-        code += f"        \n"
-        code += f"        self.play(Create(ax), Create(curve))\n"
-        code += f"        self.play(FadeIn(area, shift=UP*0.5), run_time=2)\n"
-        code += f"        self.wait(2)\n"
-        return code
+        # Setup Axes
+        if not context.object_exists("axes"):
+            context.add_obj("axes", "axes", f"        ax = Axes(x_range=[-1, 3], y_range=[-1, 9], axis_config={{'color': '{axis_color}'}})\n")
+        
+        # Setup Curve and Area
+        context.add_obj("curve", "curve", f"        curve = ax.plot(lambda x: {expression}, color='{primary_color}')\n")
+        context.add_obj("area", "area", f"        area = ax.get_area(curve, x_range={x_range}, color='{accent_color}', opacity=0.5)\n")
+        
+        # Animations
+        context.add_anim("        self.play(Create(ax), Create(curve))\n")
+        context.add_anim("        self.play(FadeIn(area, shift=UP*0.5), run_time=2)\n")
+        context.add_anim("        self.wait(2)\n")
 
-class GradientDescentTemplate(BaseTemplate):
+class GradientDescentTemplate(CompositionAwareTemplate):
     """Template for showing gradient descent optimization on a curve."""
-    
-    def generate_construct_code(self) -> str:
-        code = f"        # Gradient Descent Pattern\n"
-        code += f"        ax = Axes(x_range=[-4, 4], y_range=[-1, 16])\n"
-        code += f"        loss_fn = ax.plot(lambda x: x**2, color=PURPLE)\n"
-        code += f"        \n"
-        code += f"        # Starting point\n"
-        code += f"        curr_x = ValueTracker(3.5)\n"
-        code += f"        point = always_redraw(lambda: Dot(color=YELLOW).move_to(ax.c2p(curr_x.get_value(), curr_x.get_value()**2)))\n"
-        code += f"        \n"
-        code += f"        self.play(Create(ax), Create(loss_fn))\n"
-        code += f"        self.add(point)\n"
-        code += f"        \n"
-        code += f"        # Animate steps downhill\n"
-        code += f"        for _ in range(5):\n"
-        code += f"            new_x = curr_x.get_value() * 0.5\n"
-        code += f"            self.play(curr_x.animate.set_value(new_x), run_time=1)\n"
-        code += f"        \n"
-        code += f"        self.wait(2)\n"
-        return code
+    def compose(self, context: CompositionContext) -> None:
+        primary_color = self.get_style_param("primary_color", "PURPLE")
+        accent_color = self.get_style_param("accent_color", "YELLOW")
+        
+        # Setup Axes
+        if not context.object_exists("axes"):
+            context.add_obj("axes", "axes", "        ax = Axes(x_range=[-4, 4], y_range=[-1, 16])\n")
+        
+        # Setup Loss Function
+        context.add_obj("loss_fn", "curve", f"        loss_fn = ax.plot(lambda x: x**2, color='{primary_color}')\n")
+        
+        # Setup Starting Point
+        context.add_obj("curr_x", "tracker", "        curr_x = ValueTracker(3.5)\n")
+        context.add_obj("point", "dot", f"        point = always_redraw(lambda: Dot(color='{accent_color}').move_to(ax.c2p(curr_x.get_value(), curr_x.get_value()**2, 0)))\n")
+        
+        # Animations
+        context.add_anim("        self.play(Create(ax), Create(loss_fn))\n")
+        context.add_anim("        self.add(point)\n")
+        
+        # Animate steps downhill
+        step_code = (
+            "        for _ in range(5):\n"
+            "            new_x = curr_x.get_value() * 0.5\n"
+            "            self.play(curr_x.animate.set_value(new_x), run_time=1)\n"
+        )
+        context.add_anim(step_code)
+        context.add_anim("        self.wait(2)\n")
 
 # Phase 2: Advanced Calculus Templates
 
 class DerivativeSlopeTemplate(CompositionAwareTemplate):
-    """Template for understanding derivative as slope of tangent line."""
+    """Advanced pedagogical template for derivative slope."""
     def compose(self, context: "CompositionContext") -> None:
         expr = self.parameters.get("expression", "x**2")
-        x_val = self.parameters.get("x", 1.0)
+        x_val = self.parameters.get("x", 1.5)
         primary_color = self.get_style_param("primary_color", "BLUE")
         accent_color = self.get_style_param("accent_color", "YELLOW")
         axis_color = self.get_style_param("axis_color", "GREY")
         
-        # Draw axes
-        axes_code = f"        ax = Axes(x_range=[-3, 3], y_range=[-1, 9], axis_config={{'color': '{axis_color}'}})\n"
-        context.add_obj("axes", "axes", axes_code)
+        # 1. Setup (Axes first)
+        context.add_obj("ax", "axes", f"        ax = Axes(x_range=[-3, 3], y_range=[-1, 9], axis_config={{'color': '{axis_color}'}})\n")
+        context.add_anim("        self.play(Create(ax))\n")
         
-        # Draw curve
-        curve_code = f"        curve = ax.plot(lambda x: {expr}, color='{primary_color}')\n"
-        context.add_obj("curve", "curve", curve_code)
+        # 2. Draw Curve
+        context.add_obj("curve", "curve", f"        curve = ax.plot(lambda x: {expr}, color='{primary_color}')\n")
+        context.add_anim("        self.play(Create(curve))\n")
         
-        anim_code = "        self.play(Create(ax), Create(curve))\n"
-        context.add_anim(anim_code)
+        # 3. Highlight Key Concept (The point)
+        # Use ax.c2p to ensure it's locked to the coordinate system
+        context.add_obj("point", "dot", f"        point = Dot(ax.c2p({x_val}, {x_val}**2, 0), color='{accent_color}')\n")
+        context.add_anim("        self.play(FadeIn(point, scale=0.5))\n")
         
-        # Place point on curve
-        point_code = f"        point = Dot(ax.c2p({x_val}, {x_val}**2, 0), color='{accent_color}')\n"
-        context.add_obj("point", "dot", point_code)
+        # 4. Action & Synchronized Labels (The tangent line)
+        # Use get_tangent_line to guarantee it's linked to the curve
+        context.add_obj("tangent", "line", f"        tangent = ax.get_tangent_line({x_val}, curve, length=4, color='{accent_color}')\n")
         
-        # Draw tangent line
-        # For x^2, derivative is 2x. Tangent line point-slope: y - y0 = m(x - x0)
+        # Calculate slope for the label
         m = 2 * x_val
-        y0 = x_val**2
-        # Use two points to define the line for stability
-        x1, x2 = x_val - 1, x_val + 1
-        y1, y2 = y0 + m*(x1 - x_val), y0 + m*(x2 - x_val)
+        context.add_obj("slope_label", "label", f"        slope_label = MathTex(r'm = {m}', color='{accent_color}').next_to(tangent, UR, buff=0.1)\n")
         
-        tangent_code = f"        # Slope at x={x_val}: {m}\n"
-        tangent_code += f"        tangent = Line(ax.c2p({x1}, {y1}, 0), ax.c2p({x2}, {y2}, 0), color='{accent_color}')\n"
-        context.add_obj("tangent", "line", tangent_code)
+        context.add_anim("        self.play(Create(tangent), Write(slope_label))\n")
         
-        # Animation
-        anim_code = "        self.play(FadeIn(point), Create(tangent))\n"
-        context.add_anim(anim_code)
+        # 5. Emphasize Result
+        context.add_anim("        self.play(Indicate(slope_label, scale_factor=1.2), tangent.animate.set_stroke(width=10))\n")
+        context.add_anim("        self.wait(2)\n")
 
 class IntegralAccumulationTemplate(CompositionAwareTemplate):
     """Template for integral as cumulative sum/area."""
@@ -125,25 +133,25 @@ class IntegralAccumulationTemplate(CompositionAwareTemplate):
         context.add_obj("axes", "axes", axes_code)
         
         # Function curve
-        curve_code = f"        curve = ax.plot(lambda x: {expr}, color=BLUE)\n"
+        curve_code = f"        curve = ax.plot(lambda x: {expr}, color='BLUE')\n"
         context.add_obj("curve", "curve", curve_code)
         
         # Area under curve
-        area_code = f"        area = ax.get_area(curve, x_range={x_range}, color=TEAL, opacity=0.5)\n"
+        area_code = f"        area = ax.get_area(curve, x_range={x_range}, color='TEAL', opacity=0.5)\n"
         context.add_obj("area", "area", area_code, {"x_range": x_range})
         
-        anim_code = "        self.play(Create(ax), Create(curve), FadeIn(area))\n"
+        anim_code = "        self.play(Create(ax), Create(curve), FadeIn(area))\\n"
         context.add_anim(anim_code)
 
 class ChainRuleTemplate(CompositionAwareTemplate):
     """Template for visualizing the chain rule."""
     def compose(self, context: "CompositionContext") -> None:
         # Outer function
-        outer_code = "        outer_fn = ax.plot(lambda x: x**2, color=BLUE)\n"
+        outer_code = "        outer_fn = ax.plot(lambda x: x**2, color='BLUE')\\n"
         context.add_obj("outer_fn", "curve", outer_code)
         
         # Inner function
-        inner_code = "        inner_fn = ax.plot(lambda x: x + 1, color=RED)\n"
+        inner_code = "        inner_fn = ax.plot(lambda x: x + 1, color='RED')\\n"
         context.add_obj("inner_fn", "curve", inner_code)
         
         # Composition
@@ -158,11 +166,11 @@ class GradientDescentAdvancedTemplate(CompositionAwareTemplate):
         context.add_obj("axes", "axes", axes_code)
         
         # Loss function (parabola)
-        loss_code = "        loss = ax.plot(lambda x: x**2, color=PURPLE)\n"
+        loss_code = "        loss = ax.plot(lambda x: x**2, color='PURPLE')\\n"
         context.add_obj("loss", "curve", loss_code)
         
         # Starting point
-        start_code = "        point = Dot(ax.c2p(3.5, 12.25, 0), color=YELLOW)\n"
+        start_code = "        point = Dot(ax.c2p(3.5, 12.25, 0), color='YELLOW')\\n"
         context.add_obj("point", "dot", start_code)
         
         anim_code = "        self.play(Create(ax), Create(loss), FadeIn(point))\n"
@@ -179,18 +187,18 @@ class PowerRuleTemplate(CompositionAwareTemplate):
             context.add_obj("axes", "axes", ax_code)
         
         # Plot f(x) = x^n
-        curve_code = f"        curve = ax.plot(lambda x: x**{n}, color=BLUE)\n"
+        curve_code = f"        curve = ax.plot(lambda x: x**{{n}}, color='BLUE')\\n"
         context.add_obj("curve", "curve", curve_code)
         
         # Plot f'(x) = nx^(n-1)
-        deriv_code = f"        deriv = ax.plot(lambda x: {n} * x**({n}-1), color=RED)\n"
+        deriv_code = f"        deriv = ax.plot(lambda x: {{n}} * x**({{n}}-1), color='RED')\\n"
         context.add_obj("deriv", "curve", deriv_code)
         
         # Labels
-        label_f = f"        label_f = MathTex(r'f(x) = x^{{{n}}}', color=BLUE).to_corner(UL)\n"
+        label_f = f"        label_f = MathTex(r'f(x) = x^{{{{n}}}}', color='BLUE').to_corner(UL)\\n"
         context.add_obj("label_f", "label", label_f)
         
-        label_df = f"        label_df = MathTex(r'f\\'(x) = {n}x^{{{n-1}}}', color=RED).next_to(label_f, DOWN)\n"
+        label_df = f"        label_df = MathTex(r'f\\\\'(x) = {{n}}x^{{{{n-1}}}}', color='RED').next_to(label_f, DOWN)\\n"
         context.add_obj("label_df", "label", label_df)
         
         context.add_anim("        self.play(Create(ax), Create(curve), Write(label_f))\n")
@@ -210,14 +218,14 @@ class TaylorSeriesTemplate(CompositionAwareTemplate):
             context.add_obj("axes", "axes", ax_code)
         
         # Original function
-        curve_code = f"        curve = ax.plot(lambda x: {expr}, color=BLUE)\n"
+        curve_code = f"        curve = ax.plot(lambda x: {{expr}}, color='BLUE')\\n"
         context.add_obj("curve", "curve", curve_code)
         
         context.add_anim("        self.play(Create(ax), Create(curve))\n")
         
         # Show approximation
         # (Simplified: just showing a polynomial)
-        poly_code = f"        poly = ax.plot(lambda x: x - (x**3)/6 + (x**5)/120, color=YELLOW)\n"
+        poly_code = f"        poly = ax.plot(lambda x: x - (x**3)/6 + (x**5)/120, color='YELLOW')\\n"
         context.add_obj("poly", "curve", poly_code)
         
         context.add_anim("        self.play(Create(poly))\n")

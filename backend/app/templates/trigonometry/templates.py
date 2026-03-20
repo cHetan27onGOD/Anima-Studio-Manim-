@@ -78,15 +78,29 @@ class TrigComparisonTemplate(CompositionAwareTemplate):
             context.add_obj("axes", "axes", ax_code)
         
         # Plot each function
-        for i, func_name in enumerate(funcs):
+        import re
+        for i, func_expr in enumerate(funcs):
             color = colors[i % len(colors)]
-            expr = f"np.{func_name}(x)"
-            curve_id = f"curve_{func_name}"
-            curve_code = f"        {curve_id} = ax.plot(lambda x: {expr}, color={color})\n"
+            
+            # Handle both "sin" and "sin(x)**2" formats gracefully
+            clean_expr = func_expr.replace("sin(", "np.sin(").replace("cos(", "np.cos(")
+            if clean_expr == "sin":
+                clean_expr = "np.sin(x)"
+            elif clean_expr == "cos":
+                clean_expr = "np.cos(x)"
+            elif "(x)" not in clean_expr:
+                 # fallback for bare functions like "tan"
+                 clean_expr = f"np.{clean_expr}(x)"
+                 
+            safe_id = re.sub(r'\W+', '_', func_expr).strip('_')
+            curve_id = f"curve_{safe_id}"
+            
+            curve_code = f"        {curve_id} = ax.plot(lambda x: {clean_expr}, color={color})\n"
             context.add_obj(curve_id, "curve", curve_code)
             
-            label_id = f"label_{func_name}"
-            label_code = f"        {label_id} = MathTex(r'\\{func_name}(x)', color={color}).next_to(ax.c2p({x_range[1]}, 0), UP).shift(LEFT*2 + DOWN*{i})\n"
+            label_id = f"label_{safe_id}"
+            label_text = func_expr.replace("**2", "^2")
+            label_code = f"        {label_id} = MathTex(r'{label_text}', color={color}).next_to(ax.c2p({x_range[1]}, 0), UP).shift(LEFT*2 + DOWN*{i})\n"
             context.add_obj(label_id, "label", label_code)
             
             context.add_anim(f"        self.play(Create({curve_id}), Write({label_id}))\n")
