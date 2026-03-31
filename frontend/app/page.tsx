@@ -830,6 +830,16 @@ export default function Home() {
 
                                   {!showRawJSON && (
                                     <div className="space-y-5">
+                                      {/* T5 Preprocessor Output */}
+                                      {job.plan_json.parameters?.input_understanding?.normalized_prompt?.text && (
+                                        <div className="bg-teal/5 rounded-lg p-4 border border-teal/20">
+                                          <span className="text-xs font-semibold text-teal-dark uppercase tracking-wide block mb-1.5 flex items-center gap-1.5">
+                                            <Terminal className="w-3.5 h-3.5" /> T5 Preprocessor Analysis
+                                          </span>
+                                          <p className="text-sm font-medium text-ink/90 leading-relaxed italic">"{job.plan_json.parameters.input_understanding.normalized_prompt.text}"</p>
+                                        </div>
+                                      )}
+
                                       {/* Title */}
                                       <div className="bg-paper-dark rounded-lg p-4 border border-ink/10">
                                         <span className="text-xs font-semibold text-ink-muted uppercase tracking-wide block mb-1.5">

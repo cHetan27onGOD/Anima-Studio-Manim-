@@ -10,18 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
-from app.models import Job, JobStatus, User
+from app.models import Job, JobStatus
 from app.schemas.animation import AnimationPlan
 from app.services.llm import generate_manim_code, generate_plan
 from app.worker.celery_app import celery_app
 
 # Create dedicated async engine for worker with NullPool
 # NullPool ensures we don't share connections between event loops in Celery worker processes
-worker_engine = create_async_engine(
-    settings.DATABASE_URL, 
-    echo=False,
-    poolclass=NullPool
-)
+worker_engine = create_async_engine(settings.DATABASE_URL, echo=False, poolclass=NullPool)
 WorkerAsyncSession = async_sessionmaker(worker_engine, class_=AsyncSession, expire_on_commit=False)
 
 # Redis client for log streaming
@@ -94,6 +90,7 @@ def generate_manim_code_from_plan(plan: AnimationPlan) -> str:
     Fallback renderer that uses the Template Engine.
     """
     from app.templates.engine import render_template
+
     # For generic fallback, pass the whole plan dict
     template_params = plan.parameters if plan.template != "generic" else plan.model_dump()
     return render_template(plan.template or "generic", template_params)
@@ -125,8 +122,7 @@ def render_graph_task(self, job_id: str):
     Celery task to render graph using Manim.
     """
     import asyncio
-    import sys
-    
+
     # Ensure we have a fresh event loop for the worker thread
     try:
         loop = asyncio.new_event_loop()
@@ -134,7 +130,7 @@ def render_graph_task(self, job_id: str):
         return loop.run_until_complete(render_graph_async(job_id))
     except Exception as e:
         print(f"Task runner failed for job {job_id}: {str(e)}")
-        # We don't have access to publish_log here without session, 
+        # We don't have access to publish_log here without session,
         # but we can at least log to stdout for docker logs
         raise e
     finally:
@@ -154,7 +150,7 @@ def render_custom_code_task(self, job_id: str):
     Celery task to render custom Manim code.
     """
     import asyncio
-    
+
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -176,7 +172,9 @@ async def render_custom_code_async(job_id: str):
         try:
             subprocess.run(["docker", "ps"], capture_output=True, check=True, timeout=5)
         except Exception as e:
-            raise Exception(f"Docker connection failed: {str(e)}. Ensure /var/run/docker.sock is mounted and permissions are correct.")
+            raise Exception(
+                f"Docker connection failed: {str(e)}. Ensure /var/run/docker.sock is mounted and permissions are correct."
+            )
 
         await update_job_status(job_id, JobStatus.RUNNING)
         logs.append(f"Started custom code rendering for job {job_id}")
@@ -193,6 +191,7 @@ async def render_custom_code_async(job_id: str):
         def _detect_scene_class(code: str) -> str:
             m = re.search(r"class\s+(\w+)\s*\((?:Scene|GraphScene|ThreeDScene)\)\s*:", code)
             return m.group(1) if m else "Scene1"
+
         scene_class = _detect_scene_class(manim_code)
 
         # Create temp file
@@ -201,15 +200,33 @@ async def render_custom_code_async(job_id: str):
             scene_file = f.name
 
         output_filename = f"{job_id}.mp4"
-        
+
         # Copy to renderer
-        copy_cmd = ["docker", "exec", "-i", "anima_manim_renderer", "bash", "-c", "cat > /manim/scene.py"]
+        copy_cmd = [
+            "docker",
+            "exec",
+            "-i",
+            "anima_manim_renderer",
+            "bash",
+            "-c",
+            "cat > /manim/scene.py",
+        ]
         subprocess.run(copy_cmd, input=manim_code.encode(), capture_output=True, timeout=30)
 
         # Render
-        docker_cmd = ["docker", "exec", "anima_manim_renderer", "manim", "-qh", "/manim/scene.py", scene_class, "-o", output_filename]
+        docker_cmd = [
+            "docker",
+            "exec",
+            "anima_manim_renderer",
+            "manim",
+            "-qh",
+            "/manim/scene.py",
+            scene_class,
+            "-o",
+            output_filename,
+        ]
         render_process = subprocess.run(docker_cmd, capture_output=True, timeout=120, text=True)
-        
+
         if render_process.returncode != 0:
             raise Exception(f"Manim render failed: {render_process.stderr}")
 
@@ -228,7 +245,9 @@ async def render_custom_code_async(job_id: str):
         publish_log(job_id, "Custom render successful!")
         Path(scene_file).unlink(missing_ok=True)
 
-        await update_job_status(job_id, JobStatus.SUCCEEDED, video_filename=output_filename, logs="\n".join(logs))
+        await update_job_status(
+            job_id, JobStatus.SUCCEEDED, video_filename=output_filename, logs="\n".join(logs)
+        )
         return {"status": "success", "video_filename": output_filename}
 
     except Exception as e:
@@ -250,7 +269,9 @@ async def render_graph_async(job_id: str):
         try:
             subprocess.run(["docker", "ps"], capture_output=True, check=True, timeout=5)
         except Exception as e:
-            raise Exception(f"Docker connection failed: {str(e)}. Ensure /var/run/docker.sock is mounted and permissions are correct.")
+            raise Exception(
+                f"Docker connection failed: {str(e)}. Ensure /var/run/docker.sock is mounted and permissions are correct."
+            )
 
         # Update status to running
         await update_job_status(job_id, JobStatus.RUNNING)
@@ -270,13 +291,13 @@ async def render_graph_async(job_id: str):
         logs.append("Calling LLM Planner to generate DSL...")
         publish_log(job_id, "Planning animation scenes...")
         await update_job_status(job_id, JobStatus.RUNNING, progress=10)
-        
+
         plan = generate_plan(prompt)
         logs.append(f"DSL Plan generated: {plan.title} ({len(plan.scenes)} scenes)")
         publish_log(job_id, f"Plan generated: {plan.title}")
 
         # If plan was rate-limited, record it so frontend can warn user
-        if getattr(plan, 'rate_limited', False):
+        if getattr(plan, "rate_limited", False):
             logs.append("Plan was rate-limited due to LLM quota")
             publish_log(job_id, "Plan hit LLM quota; using simplified fallback.")
 
@@ -288,15 +309,17 @@ async def render_graph_async(job_id: str):
         if plan.template and plan.template != "generic":
             logs.append(f"Using template: {plan.template}")
             publish_log(job_id, f"Applying template: {plan.template}...")
-            
+
             from app.templates.engine import render_template
+
             template_params = plan.parameters or {}
             manim_code = render_template(plan.template, template_params)
         elif plan.scenes:
             logs.append("Using multi-scene generic animation")
             publish_log(job_id, "Rendering multi-scene animation...")
-            
+
             from app.templates.engine import render_multi_scene_plan
+
             manim_code = render_multi_scene_plan(plan.model_dump())
         else:
             # Fallback to direct code generation or custom DSL interpreter
@@ -309,6 +332,7 @@ async def render_graph_async(job_id: str):
         def _detect_scene_class(code: str) -> str:
             m = re.search(r"class\\s+(\\w+)\\s*\\((?:Scene|GraphScene|ThreeDScene)\\)\\s*:", code)
             return m.group(1) if m else "Scene1"
+
         scene_class = _detect_scene_class(manim_code)
 
         # Create temp file for scene
@@ -361,10 +385,10 @@ async def render_graph_async(job_id: str):
         # Run manim render
         logs.append(f"Executing Manim render command: {' '.join(docker_cmd)}")
         publish_log(job_id, "Manim render starting (this may take a few minutes)...")
-        
+
         # Update progress to 75%
         await update_job_status(job_id, JobStatus.RUNNING, progress=75)
-        
+
         # Increased timeout to 300s for complex animations
         render_process = subprocess.run(docker_cmd, capture_output=True, timeout=300, text=True)
 
@@ -372,15 +396,15 @@ async def render_graph_async(job_id: str):
             logs.append(f"Manim stdout:\n{render_process.stdout}")
         if render_process.stderr:
             logs.append(f"Manim stderr:\n{render_process.stderr}")
-            
+
         publish_log(job_id, "Manim process finished, checking results...")
 
         if render_process.returncode != 0:
             error_msg = f"Manim render failed (code {render_process.returncode})"
-            
+
             # Advanced Error Extraction Logic
             stderr_text = render_process.stderr or ""
-            
+
             # Common Manim/Python Errors
             error_patterns = {
                 r"NameError: name '(\w+)' is not defined": "Missing definition for: {0}",
@@ -390,7 +414,7 @@ async def render_graph_async(job_id: str):
                 r"TypeError: (.*)": "Type Mismatch: {0}",
                 r"ZeroDivisionError: (.*)": "Math Error: Division by zero",
             }
-            
+
             for pattern, template in error_patterns.items():
                 match = re.search(pattern, stderr_text)
                 if match:
@@ -398,13 +422,13 @@ async def render_graph_async(job_id: str):
                     break
             else:
                 # If no pattern matches, try to find the last line of the traceback
-                lines = [l for l in stderr_text.strip().split("\n") if l.strip()]
+                lines = [line for line in stderr_text.strip().split("\n") if line.strip()]
                 if lines:
                     error_msg += f" - {lines[-1]}"
 
             if "Scene1" not in manim_code and "scene_class" not in locals():
                 error_msg += " (Note: No Scene class detected)"
-                
+
             raise Exception(f"{error_msg}")
 
         # Update progress to 90%
@@ -442,7 +466,7 @@ async def render_graph_async(job_id: str):
             video_filename=output_filename,
             code=manim_code,
             logs="\n".join(logs),
-            progress=100
+            progress=100,
         )
 
         return {"status": "success", "video_filename": output_filename}

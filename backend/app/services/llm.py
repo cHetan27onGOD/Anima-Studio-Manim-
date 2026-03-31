@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 from typing import Any, Dict, List, Optional
@@ -10,7 +11,14 @@ from typing import Any, Dict, List, Optional
 import google.generativeai as genai
 import redis
 from google.generativeai.types import HarmBlockThreshold, HarmCategory
-from pydantic import ValidationError
+
+try:
+    import torch
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+except Exception:
+    torch = None
+    AutoModelForSeq2SeqLM = None
+    AutoTokenizer = None
 
 from app.core.config import settings
 from app.schemas.animation import AnimationObject, AnimationPlan, AnimationScene, AnimationStep
@@ -46,6 +54,49 @@ LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+# Mandatory T5 prompt enhancement for stronger intent understanding.
+T5_MODEL_NAME = os.getenv("T5_MODEL_NAME", "google/flan-t5-small")
+T5_MAX_INPUT_TOKENS = int(os.getenv("T5_MAX_INPUT_TOKENS", "384"))
+T5_MAX_NEW_TOKENS = int(os.getenv("T5_MAX_NEW_TOKENS", "192"))
+T5_ENHANCED_CONTEXT_MAX_CHARS = int(os.getenv("T5_ENHANCED_CONTEXT_MAX_CHARS", "720"))
+T5_STRUCTURED_ENABLED = os.getenv("T5_STRUCTURED_ENABLED", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+T5_STRUCTURED_TASK_PREFIX = os.getenv(
+    "T5_STRUCTURED_TASK_PREFIX",
+    "translate English to graph JSON: ",
+)
+T5_STRUCTURED_MAX_NEW_TOKENS = int(os.getenv("T5_STRUCTURED_MAX_NEW_TOKENS", "96"))
+
+_SAFE_PLOT_COLOR_TOKENS = {
+    "BLUE",
+    "BLUE_C",
+    "BLUE_D",
+    "GREEN",
+    "GREEN_C",
+    "TEAL",
+    "YELLOW",
+    "GOLD",
+    "RED",
+    "MAROON",
+    "ORANGE",
+    "PURPLE",
+    "WHITE",
+}
+
+_SAFE_EXPR_TOKEN_PATTERN = re.compile(r"[A-Za-z_]+")
+_SAFE_NUMERIC_EXPR_PATTERN = re.compile(r"^[0-9eE\+\-\*/\(\)\.,\s]*$")
+_PLOT_DEFAULT_X_RANGE = [0.0, 2.0 * math.pi]
+_PLOT_DEFAULT_Y_RANGE = [-3.0, 3.0]
+
+_T5_INITIALIZED = False
+_T5_TOKENIZER: Any = None
+_T5_MODEL: Any = None
+_T5_INIT_ERROR: Optional[str] = None
 
 # Combined Visual Reasoning + DSL Planner prompt with Phase 2 Templates
 # Enhanced with logic inspired by high-quality Manim generators
@@ -284,6 +335,464 @@ _CONCISE_RENDER_HINTS = {
     "simple",
     "minimal",
 }
+
+
+def _load_t5_preprocessor() -> tuple[Any, Any]:
+    """Load T5 artifacts once and reuse across requests."""
+    global _T5_INITIALIZED, _T5_TOKENIZER, _T5_MODEL, _T5_INIT_ERROR
+
+    if _T5_INITIALIZED:
+        if _T5_INIT_ERROR:
+            raise RuntimeError(_T5_INIT_ERROR)
+        return _T5_TOKENIZER, _T5_MODEL
+
+    if AutoTokenizer is None or AutoModelForSeq2SeqLM is None:
+        _T5_INIT_ERROR = "T5 input preprocessor is mandatory but transformers/torch are unavailable"
+        _T5_INITIALIZED = True
+        raise RuntimeError(_T5_INIT_ERROR)
+
+    try:
+        _T5_TOKENIZER = AutoTokenizer.from_pretrained(T5_MODEL_NAME)
+        _T5_MODEL = AutoModelForSeq2SeqLM.from_pretrained(T5_MODEL_NAME)
+        _T5_MODEL.eval()
+        _T5_INIT_ERROR = None
+        _T5_INITIALIZED = True
+        logger.info("Mandatory T5 input preprocessor enabled", extra={"model": T5_MODEL_NAME})
+    except Exception as e:
+        _T5_INIT_ERROR = f"Failed to initialize mandatory T5 preprocessor: {e}"
+        _T5_TOKENIZER = None
+        _T5_MODEL = None
+        _T5_INITIALIZED = True
+        raise RuntimeError(_T5_INIT_ERROR) from e
+
+    return _T5_TOKENIZER, _T5_MODEL
+
+
+def _compact_prompt_text(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip())
+
+
+def _trim_prompt_text(value: str, max_chars: int) -> str:
+    compact = _compact_prompt_text(value)
+    if len(compact) <= max_chars:
+        return compact
+
+    clipped = compact[: max(0, max_chars)].rstrip()
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0]
+    return f"{clipped}..."
+
+
+def _merge_prompt_with_enhancement(user_prompt: str, enhanced_prompt: str) -> str:
+    """Build a planner-facing prompt that preserves the original request and adds enrichment."""
+    original = _compact_prompt_text(user_prompt)
+    enhanced = _trim_prompt_text(enhanced_prompt, T5_ENHANCED_CONTEXT_MAX_CHARS)
+
+    if not original:
+        return enhanced
+    if not enhanced:
+        return original
+    if enhanced.lower() == original.lower():
+        return original
+
+    return (
+        "Authoritative user request (must be preserved exactly):\n"
+        f"{original}\n\n"
+        "Enhancement notes for richer animation (use these to improve scene depth, visual "
+        "staging, transitions, and pedagogy without dropping any user detail):\n"
+        f"{enhanced}"
+    )
+
+
+def _normalize_prompt_with_t5(user_prompt: str) -> tuple[str, Dict[str, Any]]:
+    """Enhance raw user text for planning while preserving all technical meaning."""
+    cleaned_prompt = _compact_prompt_text(user_prompt)
+    meta: Dict[str, Any] = {
+        "required": True,
+        "executed": False,
+        "applied": False,
+        "model": T5_MODEL_NAME,
+        "mode": "enhance_preserve",
+    }
+
+    if not cleaned_prompt:
+        meta["reason"] = "empty_prompt"
+        return cleaned_prompt, meta
+
+    meta["source_prompt"] = cleaned_prompt[:400]
+
+    tokenizer, model = _load_t5_preprocessor()
+
+    instruction = (
+        "Enhance this educational animation request for a planning model.\n"
+        "Do not summarize and do not remove any concrete detail.\n"
+        "Preserve equations, numbers, constraints, style preferences, examples, and scope.\n"
+        "Add actionable animation guidance for scene flow, visual emphasis, transitions, "
+        "pacing, and pedagogical checkpoints.\n"
+        "Return only the enhanced brief text.\n"
+        f"Request: {cleaned_prompt}"
+    )
+    try:
+        encoded = tokenizer(
+            instruction,
+            return_tensors="pt",
+            truncation=True,
+            max_length=T5_MAX_INPUT_TOKENS,
+        )
+        generation_kwargs = {
+            "max_new_tokens": T5_MAX_NEW_TOKENS,
+            "num_beams": 4,
+            "do_sample": False,
+            "early_stopping": True,
+            "no_repeat_ngram_size": 3,
+        }
+
+        if torch is not None:
+            with torch.no_grad():
+                output_ids = model.generate(**encoded, **generation_kwargs)
+        else:
+            output_ids = model.generate(**encoded, **generation_kwargs)
+
+        meta["executed"] = True
+        rewritten_prompt = _compact_prompt_text(
+            tokenizer.decode(output_ids[0], skip_special_tokens=True).strip()
+        )
+
+        if rewritten_prompt:
+            meta["text"] = rewritten_prompt
+
+        if rewritten_prompt and rewritten_prompt.lower() != cleaned_prompt.lower():
+            meta["applied"] = True
+            return rewritten_prompt, meta
+
+        if rewritten_prompt:
+            meta["reason"] = "no_change"
+            return rewritten_prompt, meta
+
+        meta["reason"] = "empty_output"
+        return cleaned_prompt, meta
+    except Exception as e:
+        logger.error(f"Mandatory T5 prompt normalization failed: {e}")
+        raise RuntimeError(f"Mandatory T5 prompt normalization failed: {e}") from e
+
+
+def _safe_eval_numeric_expression(raw_value: Any, default: float) -> float:
+    """Safely evaluate very small arithmetic expressions (e.g. 2*pi)."""
+    if isinstance(raw_value, (int, float)):
+        return float(raw_value)
+
+    expr = str(raw_value or "").strip().lower()
+    if not expr:
+        return default
+
+    # Handle implicit multiplication in numeric ranges, e.g. 2pi or (1+1)pi.
+    expr = re.sub(r"(?<=\d)(?=[A-Za-z(])", "*", expr)
+    expr = re.sub(r"(?<=\))(?=[A-Za-z0-9(])", "*", expr)
+    expr = expr.replace("tau", str(2.0 * math.pi)).replace("pi", str(math.pi))
+    expr = expr.replace("^", "**")
+    if not _SAFE_NUMERIC_EXPR_PATTERN.match(expr):
+        return default
+
+    try:
+        return float(eval(expr, {"__builtins__": {}}, {}))  # nosec B307 - validated numeric grammar
+    except Exception:
+        return default
+
+
+def _coerce_range(value: Any, default: List[float]) -> List[float]:
+    """Convert range payload into a safe [min, max] list of floats."""
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            parts = [p.strip() for p in stripped[1:-1].split(",")]
+        else:
+            parts = [p.strip() for p in stripped.split(",") if p.strip()]
+    elif isinstance(value, (list, tuple)):
+        parts = list(value)
+    else:
+        parts = []
+
+    if len(parts) < 2:
+        return list(default)
+
+    start = _safe_eval_numeric_expression(parts[0], default[0])
+    end = _safe_eval_numeric_expression(parts[1], default[1])
+    if end <= start:
+        end = start + max(1.0, abs(default[1] - default[0]))
+    return [round(start, 4), round(end, 4)]
+
+
+def _sanitize_plot_expression(raw_expression: Any) -> Optional[str]:
+    """Normalize a function expression into a safe NumPy expression for templates."""
+    expr = str(raw_expression or "").strip()
+    if not expr:
+        return None
+
+    expr = re.sub(r"^(?:y|f\(x\))\s*=\s*", "", expr, flags=re.IGNORECASE)
+    expr = expr.replace("^", "**")
+    expr = re.sub(r"\s+", "", expr)
+    # Handle implicit multiplication forms like 2sin(3x), 3x, (x+1)(x-1).
+    expr = re.sub(r"(?<=\d)(?=[A-Za-z(])", "*", expr)
+    expr = re.sub(r"(?<=\))(?=[A-Za-z0-9(])", "*", expr)
+
+    # Standardize common functions and constants.
+    replacements = {
+        "sin": "np.sin",
+        "cos": "np.cos",
+        "tan": "np.tan",
+        "sqrt": "np.sqrt",
+        "log": "np.log",
+        "exp": "np.exp",
+        "abs": "np.abs",
+    }
+    for src, dst in replacements.items():
+        expr = re.sub(rf"\b{src}\b", dst, expr)
+
+    expr = re.sub(r"\bpi\b", "np.pi", expr)
+
+    if not re.fullmatch(r"[A-Za-z0-9_\+\-\*/\(\)\.,]+", expr):
+        return None
+
+    allowed_tokens = {
+        "x",
+        "np",
+        "sin",
+        "cos",
+        "tan",
+        "sqrt",
+        "log",
+        "exp",
+        "abs",
+        "pi",
+    }
+    for token in _SAFE_EXPR_TOKEN_PATTERN.findall(expr):
+        if token not in allowed_tokens:
+            return None
+
+    return expr
+
+
+def _canonical_plot_color(raw_color: Any) -> str:
+    c = str(raw_color or "BLUE").strip().upper().replace(" ", "_")
+    return c if c in _SAFE_PLOT_COLOR_TOKENS else "BLUE"
+
+
+def _parse_t5_structured_output(raw_output: str) -> Optional[Dict[str, Any]]:
+    """Parse T5 output into a dict with at least function/expression and range."""
+    text = (raw_output or "").strip()
+    if not text:
+        return None
+
+    text = re.sub(r"^\s*json\s*:\s*", "", text, flags=re.IGNORECASE)
+
+    candidates: List[str] = [text]
+    extracted = _extract_json(text)
+    if extracted and extracted not in candidates:
+        candidates.append(extracted)
+
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+
+        normalized = candidate
+        if not normalized.startswith("{"):
+            normalized = "{" + normalized + "}"
+        normalized = re.sub(r"([,{]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:", r'\1"\2":', normalized)
+        normalized = normalized.replace("'", '"')
+        try:
+            data = json.loads(normalized)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+
+    # Final regex fallback for simple key:value strings.
+    function_match = re.search(r"(?:function|expression)\s*[:=]\s*([^,]+)", text, re.IGNORECASE)
+    range_match = re.search(r"(?:range|x_range)\s*[:=]\s*\[([^\]]+)\]", text, re.IGNORECASE)
+    parsed: Dict[str, Any] = {}
+
+    if function_match:
+        parsed["function"] = function_match.group(1).strip()
+    else:
+        equation_match = re.search(
+            r"(?:y|f\(x\))\s*=\s*(.+?)(?:\s+(?:from|for)\s+|$)",
+            text,
+            re.IGNORECASE,
+        )
+        if equation_match:
+            parsed["function"] = equation_match.group(1).strip()
+
+    if range_match:
+        parsed["range"] = [p.strip() for p in range_match.group(1).split(",") if p.strip()]
+    else:
+        natural_range = re.search(
+            r"\bfrom\s+(.+?)\s+to\s+(.+?)(?:[\.;,]|$)",
+            text,
+            re.IGNORECASE,
+        )
+        if natural_range:
+            parsed["range"] = [natural_range.group(1).strip(), natural_range.group(2).strip()]
+
+    return parsed if parsed.get("function") else None
+
+
+def _build_plot_plan_from_structured(
+    user_prompt: str, data: Dict[str, Any]
+) -> Optional[AnimationPlan]:
+    """Map structured graph JSON into a deterministic draw_curve animation plan."""
+    raw_expr = data.get("function") or data.get("expression")
+    expression = _sanitize_plot_expression(raw_expr)
+    if not expression:
+        return None
+
+    raw_range: Any = data.get("range", data.get("x_range"))
+    if raw_range is None or raw_range == "" or raw_range == []:
+        natural_range = re.search(
+            r"\bfrom\s+(.+?)\s+to\s+(.+?)(?:[\.;,]|$)",
+            user_prompt,
+            re.IGNORECASE,
+        )
+        if natural_range:
+            raw_range = [natural_range.group(1).strip(), natural_range.group(2).strip()]
+
+    x_range = _coerce_range(raw_range, _PLOT_DEFAULT_X_RANGE)
+    y_range = _coerce_range(data.get("y_range"), _PLOT_DEFAULT_Y_RANGE)
+    title = str(data.get("title") or f"Function Plot: {user_prompt[:36]}").strip()[:80]
+    color = _canonical_plot_color(data.get("color"))
+
+    curve_params = {
+        "expression": expression,
+        "x_range": x_range,
+        "y_range": y_range,
+        "color": color,
+    }
+
+    return AnimationPlan(
+        title=title,
+        style="3b1b",
+        template="draw_curve",
+        parameters=curve_params,
+        scenes=[
+            AnimationScene(
+                scene_id="curve_plot",
+                template="draw_curve",
+                parameters=curve_params,
+                narration="Plot the requested function on the specified range.",
+            )
+        ],
+    )
+
+
+def _attempt_t5_structured_plan(user_prompt: str) -> tuple[Optional[AnimationPlan], Dict[str, Any]]:
+    """Try to build a direct structured plan from T5 output."""
+    meta: Dict[str, Any] = {
+        "enabled": T5_STRUCTURED_ENABLED,
+        "executed": False,
+        "used": False,
+        "model": T5_MODEL_NAME,
+    }
+
+    cleaned_prompt = re.sub(r"\s+", " ", (user_prompt or "").strip())
+    if not cleaned_prompt:
+        meta["reason"] = "empty_prompt"
+        return None, meta
+
+    if not T5_STRUCTURED_ENABLED:
+        meta["reason"] = "disabled"
+        return None, meta
+
+    try:
+        tokenizer, model = _load_t5_preprocessor()
+        inputs = tokenizer(
+            f"{T5_STRUCTURED_TASK_PREFIX}{cleaned_prompt}",
+            return_tensors="pt",
+            truncation=True,
+            max_length=T5_MAX_INPUT_TOKENS,
+        )
+
+        generate_kwargs = {
+            "max_new_tokens": T5_STRUCTURED_MAX_NEW_TOKENS,
+            "num_beams": 4,
+            "do_sample": False,
+            "early_stopping": True,
+            "no_repeat_ngram_size": 3,
+        }
+
+        if torch is not None:
+            with torch.no_grad():
+                output_ids = model.generate(**inputs, **generate_kwargs)
+        else:
+            output_ids = model.generate(**inputs, **generate_kwargs)
+
+        meta["executed"] = True
+        decoded = tokenizer.decode(output_ids[0], skip_special_tokens=True).strip()
+        meta["raw_output"] = decoded[:240]
+
+        structured_data = _parse_t5_structured_output(decoded)
+        if not structured_data:
+            meta["reason"] = "parse_failed"
+            return None, meta
+
+        plan = _build_plot_plan_from_structured(cleaned_prompt, structured_data)
+        if not plan:
+            meta["reason"] = "unsupported_structured_output"
+            return None, meta
+
+        meta["used"] = True
+        meta["reason"] = "ok"
+        return plan, meta
+    except Exception as e:
+        meta["reason"] = f"structured_t5_failed: {e}"
+        logger.warning("T5 structured plan stage failed: %s", e)
+        return None, meta
+
+
+def _attach_input_understanding_metadata(
+    plan: AnimationPlan, t5_meta: Dict[str, Any], structured_meta: Dict[str, Any]
+) -> AnimationPlan:
+    """Attach debugging metadata for T5 normalization + structured stage."""
+    plan_copy = plan.model_copy(deep=True)
+    params = dict(plan_copy.parameters or {})
+
+    enhanced_prompt = {
+        "executed": bool(t5_meta.get("executed")),
+        "applied": bool(t5_meta.get("applied")),
+        "reason": t5_meta.get("reason", "ok"),
+        "text": t5_meta.get("text", ""),
+    }
+
+    metadata = {
+        "preprocessor": "t5",
+        "required": True,
+        "mode": t5_meta.get("mode", "enhance_preserve"),
+        "model": t5_meta.get("model"),
+        "source_prompt_preview": t5_meta.get("source_prompt", ""),
+        "enhanced_prompt": enhanced_prompt,
+        # Backward-compatible alias for clients that still expect this key.
+        "normalized_prompt": dict(enhanced_prompt),
+        "structured_stage": {
+            "enabled": bool(structured_meta.get("enabled")),
+            "executed": bool(structured_meta.get("executed")),
+            "used": bool(structured_meta.get("used")),
+            "reason": structured_meta.get("reason", "unknown"),
+        },
+    }
+
+    planning_preview = t5_meta.get("planning_prompt_preview")
+    if planning_preview:
+        metadata["planning_prompt_preview"] = planning_preview
+
+    raw_preview = structured_meta.get("raw_output")
+    if raw_preview:
+        metadata["structured_stage"]["raw_output_preview"] = raw_preview
+
+    params["input_understanding"] = metadata
+    plan_copy.parameters = params
+    return plan_copy
 
 
 def _sanitize_identifier(raw: Any, default_prefix: str) -> str:
@@ -824,46 +1333,65 @@ def generate_plan(user_prompt: str) -> AnimationPlan:
     """
     Generate animation plan with combined intent extraction, caching, and validation.
     """
-    render_profile = _build_render_profile(user_prompt)
+    enhanced_prompt, t5_meta = _normalize_prompt_with_t5(user_prompt)
+    prompt_for_planning = _merge_prompt_with_enhancement(user_prompt, enhanced_prompt)
+    t5_meta["planning_prompt_preview"] = prompt_for_planning[:280]
+
+    if t5_meta.get("applied"):
+        logger.info("T5 enhanced prompt for planning")
+
+    prompt_for_profile = user_prompt or enhanced_prompt or prompt_for_planning
+    render_profile = _build_render_profile(prompt_for_profile)
+    structured_seed_prompt = user_prompt or enhanced_prompt or prompt_for_planning
+    structured_plan, t5_struct_meta = _attempt_t5_structured_plan(structured_seed_prompt)
+
+    if structured_plan is not None:
+        plan = _apply_render_profile_to_plan(structured_plan, render_profile, prompt_for_profile)
+        plan = _attach_input_understanding_metadata(plan, t5_meta, t5_struct_meta)
+        plan = _finalize_plan_durations(plan, render_profile)
+        logger.info("Using direct T5 structured plan path")
+        return plan
 
     def _profiled_fallback_plan(prompt_text: str) -> AnimationPlan:
-        fallback_title = (prompt_text or "Concept Overview")[:60]
-        fallback = _build_template_free_plan(prompt_text, "3b1b", fallback_title)
-        fallback = _apply_render_profile_to_plan(fallback, render_profile, prompt_text)
+        fallback_prompt = prompt_text or prompt_for_profile
+        fallback_title = (fallback_prompt or "Concept Overview")[:60]
+        fallback = _build_template_free_plan(fallback_prompt, "3b1b", fallback_title)
+        fallback = _apply_render_profile_to_plan(fallback, render_profile, fallback_prompt)
+        fallback = _attach_input_understanding_metadata(fallback, t5_meta, t5_struct_meta)
         return _finalize_plan_durations(fallback, render_profile)
 
     if LLM_PROVIDER == "gemini":
         if not GEMINI_API_KEY:
             logger.warning("GEMINI_API_KEY not set, using fallback plan")
-            return _profiled_fallback_plan(user_prompt)
+            return _profiled_fallback_plan(prompt_for_profile)
     elif LLM_PROVIDER == "openai":
         if not (OPENAI_API_KEY or OPENAI_BASE_URL):
             logger.warning("OPENAI configuration missing, using fallback plan")
-            return _profiled_fallback_plan(user_prompt)
+            return _profiled_fallback_plan(prompt_for_profile)
     else:
         logger.warning(f"Unsupported LLM_PROVIDER '{LLM_PROVIDER}', using fallback plan")
-        return _profiled_fallback_plan(user_prompt)
+        return _profiled_fallback_plan(prompt_for_profile)
 
     # 1. Check Redis Cache
-    cache_key = f"plan_v2:{hashlib.md5(user_prompt.encode()).hexdigest()}"
+    cache_key = f"plan_v3:{hashlib.md5(prompt_for_planning.encode()).hexdigest()}"
     try:
         cached_plan = redis_client.get(cache_key)
         if cached_plan:
-            logger.info("Plan found in cache", extra={"prompt": user_prompt[:50]})
+            logger.info("Plan found in cache", extra={"prompt": prompt_for_planning[:50]})
             return AnimationPlan.model_validate_json(cached_plan)
     except Exception as e:
         logger.warning(f"Cache lookup failed: {e}")
 
     # 2. Concept Router (Lightweight check before LLM)
-    concept_intent = rule_based_concept_router(user_prompt)
+    concept_intent = rule_based_concept_router(prompt_for_profile)
 
     # guard against enormous prompts
-    if len(user_prompt) > 2000:
+    if len(prompt_for_planning) > 2000:
         logger.warning("Prompt too long; truncating to 2000 chars")
-        user_prompt = user_prompt[:2000]
+        prompt_for_planning = prompt_for_planning[:2000]
 
     try:
-        plan = call_combined_llm_planner(user_prompt, concept_intent)
+        plan = call_combined_llm_planner(prompt_for_planning, concept_intent)
 
         # Force template if detected by router but not set by LLM
         if concept_intent and concept_intent.template and not plan.template:
@@ -904,16 +1432,19 @@ def generate_plan(user_prompt: str) -> AnimationPlan:
             plan.parameters = plan_params
 
         # 4. Validate Plan
-        violations = validate_plan_against_intent(plan, concept_intent, user_prompt)
+        violations = validate_plan_against_intent(plan, concept_intent, prompt_for_profile)
         if violations:
             logger.warning(f"Plan violations detected: {violations}")
-            plan = repair_plan(user_prompt, concept_intent, plan, violations)
+            plan = repair_plan(prompt_for_profile, concept_intent, plan, violations)
 
         # 4.5 Stabilize for unseen/complex prompts and sanitize unsafe scene references.
-        plan = _stabilize_plan_for_rendering(plan, user_prompt, concept_intent)
+        plan = _stabilize_plan_for_rendering(plan, prompt_for_profile, concept_intent)
 
         # 4.6 Apply prompt-aware hybrid render profile for richer pacing and density.
-        plan = _apply_render_profile_to_plan(plan, render_profile, user_prompt)
+        plan = _apply_render_profile_to_plan(plan, render_profile, prompt_for_profile)
+
+        # Attach lightweight debugging metadata for input understanding.
+        plan = _attach_input_understanding_metadata(plan, t5_meta, t5_struct_meta)
 
         # 5. Post-process narration and durations in plan (Phase 3)
         try:
@@ -944,10 +1475,16 @@ def generate_plan(user_prompt: str) -> AnimationPlan:
     except LLMQuotaExceededError as e:
         logger.error(f"LLM quota exceeded: {e}")
         # return a minimal fallback that instructs the user to simplify
-        return AnimationPlan.create_rate_limited_fallback(user_prompt)
+        fallback = AnimationPlan.create_rate_limited_fallback(prompt_for_profile)
+        fallback = _apply_render_profile_to_plan(fallback, render_profile, prompt_for_profile)
+        fallback = _attach_input_understanding_metadata(fallback, t5_meta, t5_struct_meta)
+        return _finalize_plan_durations(fallback, render_profile)
     except Exception as e:
         logger.error(f"Plan generation failed: {e}", exc_info=True)
-        return AnimationPlan.create_fallback(user_prompt)
+        fallback = AnimationPlan.create_fallback(prompt_for_profile)
+        fallback = _apply_render_profile_to_plan(fallback, render_profile, prompt_for_profile)
+        fallback = _attach_input_understanding_metadata(fallback, t5_meta, t5_struct_meta)
+        return _finalize_plan_durations(fallback, render_profile)
 
 
 def generate_manim_code(user_prompt: str) -> str:
@@ -957,10 +1494,16 @@ def generate_manim_code(user_prompt: str) -> str:
     # 1. Generate the plan (uses caching, combined LLM call, and validation)
     plan = generate_plan(user_prompt)
 
-    # 2. Convert plan to code using the template engine
-    from app.worker.tasks import generate_manim_code_from_plan
+    # 2. Convert plan to code using the template engine directly.
+    from app.templates.engine import render_multi_scene_plan, render_template
 
-    return generate_manim_code_from_plan(plan)
+    if plan.template and plan.template != "generic":
+        return render_template(plan.template, plan.parameters or {})
+
+    if plan.scenes:
+        return render_multi_scene_plan(plan.model_dump())
+
+    return render_template("generic", plan.model_dump())
 
 
 def rule_based_concept_router(prompt: str) -> Optional[UserIntent]:
@@ -1078,8 +1621,9 @@ def call_combined_llm_planner(user_prompt: str, hint: Optional[UserIntent] = Non
     """
     full_prompt = COMBINED_PLANNER_PROMPT.format(user_prompt=user_prompt)
     full_prompt += (
-        "\n\nNOTE: Please produce no more than 8 scenes and keep the total plan "
-        "size under 2000 tokens. Be concise and avoid extraneous detail."
+        "\n\nNOTE: Produce 4 to 8 scenes with concrete visual actions and strong "
+        "pedagogical depth. Keep the total plan under 2500 tokens while preserving "
+        "critical technical detail from the user request."
     )
     if hint:
         full_prompt += (
