@@ -85,15 +85,11 @@ def is_valid_label(label: str) -> bool:
     return bool(re.match(r"^[a-zA-Z0-9\s]+$", label))
 
 
-def generate_manim_code_from_plan(plan: AnimationPlan) -> str:
+def generate_manim_code_from_plan(plan: AnimationPlan, prompt: str) -> str:
     """
-    Fallback renderer that uses the Template Engine.
+    Generate fresh Manim code directly via LLM, bypassing template routing.
     """
-    from app.templates.engine import render_template
-
-    # For generic fallback, pass the whole plan dict
-    template_params = plan.parameters if plan.template != "generic" else plan.model_dump()
-    return render_template(plan.template or "generic", template_params)
+    return generate_manim_code(prompt, plan)
 
 
 async def update_job_status(job_id: str, status: JobStatus, **kwargs):
@@ -305,27 +301,10 @@ async def render_graph_async(job_id: str):
         plan_dict = plan.model_dump()
         await update_job_status(job_id, JobStatus.RUNNING, plan_json=plan_dict, progress=25)
 
-        # Step 2: Template Engine / Manim Codegen
-        if plan.template and plan.template != "generic":
-            logs.append(f"Using template: {plan.template}")
-            publish_log(job_id, f"Applying template: {plan.template}...")
-
-            from app.templates.engine import render_template
-
-            template_params = plan.parameters or {}
-            manim_code = render_template(plan.template, template_params)
-        elif plan.scenes:
-            logs.append("Using multi-scene generic animation")
-            publish_log(job_id, "Rendering multi-scene animation...")
-
-            from app.templates.engine import render_multi_scene_plan
-
-            manim_code = render_multi_scene_plan(plan.model_dump())
-        else:
-            # Fallback to direct code generation or custom DSL interpreter
-            logs.append("No template matched. Falling back to direct plan generation...")
-            publish_log(job_id, "Generating custom Manim logic...")
-            manim_code = generate_manim_code(prompt)
+        # Step 2: Scene-based Manim codegen (no template routing shortcuts)
+        logs.append("Rendering fresh scene-based Manim code")
+        publish_log(job_id, "Generating fresh Manim code from current plan...")
+        manim_code = generate_manim_code_from_plan(plan, prompt)
 
         await update_job_status(job_id, JobStatus.RUNNING, progress=50)
 
