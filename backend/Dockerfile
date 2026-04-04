@@ -5,6 +5,9 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
+    g++ \
+    cmake \
+    libpq-dev \
     postgresql-client \
     docker.io \
     && rm -rf /var/lib/apt/lists/*

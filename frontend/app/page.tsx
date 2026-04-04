@@ -830,6 +830,131 @@ export default function Home() {
 
                                   {!showRawJSON && (
                                     <div className="space-y-5">
+                                      {/* T5 Preprocessor Output */}
+                                      {job.plan_json.parameters?.input_understanding?.normalized_prompt?.text && (
+                                        <div className="bg-teal/5 rounded-lg p-4 border border-teal/20">
+                                          <span className="text-xs font-semibold text-teal-dark uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                                            <Terminal className="w-3.5 h-3.5" /> T5 Preprocessor Analysis
+                                          </span>
+                                          <p className="text-sm font-medium text-ink/90 leading-relaxed italic">"{job.plan_json.parameters.input_understanding.normalized_prompt.text}"</p>
+                                        </div>
+                                      )}
+
+                                      {/* Structured T5 JSON Output */}
+                                      {(() => {
+                                        const structuredStage = job.plan_json.parameters?.input_understanding?.structured_stage
+                                        const payloadFromPlan = job.plan_json.parameters?.structured_math_json
+                                        const payloadFromStage = structuredStage?.payload
+                                        const payloadPreview = structuredStage?.payload_preview
+                                        const rawOutputPreview = structuredStage?.raw_output_preview
+
+                                        const parseJsonCandidate = (candidate: unknown): Record<string, any> | null => {
+                                          if (candidate && typeof candidate === "object") {
+                                            return candidate as Record<string, any>
+                                          }
+                                          if (typeof candidate !== "string") {
+                                            return null
+                                          }
+
+                                          const trimmed = candidate.trim()
+                                          if (!trimmed) {
+                                            return null
+                                          }
+
+                                          const withoutFence = trimmed
+                                            .replace(/^```json\s*/i, "")
+                                            .replace(/^```/i, "")
+                                            .replace(/\s*```$/, "")
+                                            .trim()
+
+                                          try {
+                                            const parsed = JSON.parse(withoutFence)
+                                            if (parsed && typeof parsed === "object") {
+                                              return parsed as Record<string, any>
+                                            }
+                                          } catch {
+                                            return null
+                                          }
+
+                                          return null
+                                        }
+
+                                        // Prefer direct structured-stage payload from backend metadata.
+                                        const structuredPayload =
+                                          parseJsonCandidate(payloadFromStage) ||
+                                          parseJsonCandidate(payloadPreview) ||
+                                          parseJsonCandidate(rawOutputPreview) ||
+                                          parseJsonCandidate(payloadFromPlan)
+
+                                        const rawStructuredText =
+                                          (typeof payloadPreview === "string" && payloadPreview) ||
+                                          (typeof rawOutputPreview === "string" && rawOutputPreview) ||
+                                          ""
+
+                                        if (!structuredPayload && !structuredStage?.type && !rawStructuredText) {
+                                          return null
+                                        }
+
+                                        return (
+                                          <div className="bg-white rounded-lg p-4 border border-ink/10 shadow-sm space-y-3">
+                                            <div className="flex items-center justify-between gap-3">
+                                              <span className="text-xs font-semibold text-ink-muted uppercase tracking-wide flex items-center gap-1.5">
+                                                <FileText className="w-3.5 h-3.5" /> Structured Math Output
+                                              </span>
+                                              {structuredPayload && (
+                                                <button
+                                                  onClick={() =>
+                                                    copyToClipboard(
+                                                      JSON.stringify(structuredPayload, null, 2),
+                                                      "structured_math_json"
+                                                    )
+                                                  }
+                                                  className="btn-ghost text-xs"
+                                                >
+                                                  {copiedStates.structured_math_json ? (
+                                                    <Check className="mr-1.5 h-3.5 w-3.5 text-teal" />
+                                                  ) : (
+                                                    <Copy className="mr-1.5 h-3.5 w-3.5" />
+                                                  )}
+                                                  Copy Structured JSON
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {structuredStage?.type && (
+                                              <p className="text-xs text-ink-muted">
+                                                <span className="font-semibold uppercase tracking-wide">Type:</span>{" "}
+                                                <span className="font-mono text-ink">{structuredStage.type}</span>
+                                              </p>
+                                            )}
+
+                                            {structuredStage?.reason && (
+                                              <p className="text-xs text-ink-muted">
+                                                <span className="font-semibold uppercase tracking-wide">Stage:</span>{" "}
+                                                <span className="font-mono text-ink">{structuredStage.reason}</span>
+                                                {typeof structuredStage.used === "boolean" && (
+                                                  <span className="ml-2 text-ink-muted">
+                                                    ({structuredStage.used ? "used" : "not used"})
+                                                  </span>
+                                                )}
+                                              </p>
+                                            )}
+
+                                            {structuredPayload ? (
+                                              <pre className="bg-ink/95 text-paper rounded-lg p-4 overflow-x-auto text-xs leading-relaxed font-mono">
+                                                {JSON.stringify(structuredPayload, null, 2)}
+                                              </pre>
+                                            ) : rawStructuredText ? (
+                                              <pre className="bg-ink/95 text-paper rounded-lg p-4 overflow-x-auto text-xs leading-relaxed font-mono">
+                                                {rawStructuredText}
+                                              </pre>
+                                            ) : (
+                                              <p className="text-xs text-ink-muted">No structured JSON payload was produced for this job.</p>
+                                            )}
+                                          </div>
+                                        )
+                                      })()}
+
                                       {/* Title */}
                                       <div className="bg-paper-dark rounded-lg p-4 border border-ink/10">
                                         <span className="text-xs font-semibold text-ink-muted uppercase tracking-wide block mb-1.5">
