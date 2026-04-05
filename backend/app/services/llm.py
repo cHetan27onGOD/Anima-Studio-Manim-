@@ -2311,6 +2311,177 @@ def _build_requirement_locked_plot_plan(
     return _build_plot_plan_from_structured(user_prompt, plot_data)
 
 
+def _extract_binomial_exponent(user_prompt: str) -> Optional[int]:
+    if not user_prompt:
+        return None
+    compact = re.sub(r"\s+", "", user_prompt.lower())
+    match = re.search(r"\(a\+b\)\^(\d+)", compact)
+    if not match:
+        match = re.search(r"a\+b\)\^(\d+)", compact)
+    if not match:
+        match = re.search(r"a\+b\^(\d+)", compact)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
+
+    match = re.search(r"\bpower\s*(\d+)\b", user_prompt, re.IGNORECASE)
+    if not match:
+        match = re.search(r"\bto\s+the\s+(\d+)\b", user_prompt, re.IGNORECASE)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
+
+    numbers = [int(n) for n in re.findall(r"\b\d+\b", user_prompt)]
+    if len(numbers) == 1:
+        return numbers[0]
+    return None
+
+
+def _format_binomial_term(n: int, k: int) -> str:
+    coeff = math.comb(n, k)
+    a_pow = n - k
+    b_pow = k
+
+    parts: List[str] = []
+    if coeff != 1 or (a_pow == 0 and b_pow == 0):
+        parts.append(str(coeff))
+
+    if a_pow > 0:
+        if a_pow == 1:
+            parts.append("a")
+        else:
+            parts.append(f"a^{{{a_pow}}}")
+
+    if b_pow > 0:
+        if b_pow == 1:
+            parts.append("b")
+        else:
+            parts.append(f"b^{{{b_pow}}}")
+
+    return "".join(parts) if parts else "1"
+
+
+def _format_binomial_terms_latex(n: int) -> str:
+    terms: List[str] = []
+    if n > 8:
+        for k in range(0, 4):
+            terms.append(_format_binomial_term(n, k))
+        terms.append("\\cdots")
+        terms.append(_format_binomial_term(n, n))
+    else:
+        for k in range(0, n + 1):
+            terms.append(_format_binomial_term(n, k))
+
+    lines: List[str] = []
+    current: List[str] = []
+    for term in terms:
+        current.append(term)
+        if len(current) >= 3:
+            lines.append(" + ".join(current))
+            current = []
+    if current:
+        lines.append(" + ".join(current))
+
+    return " \\ ".join(lines)
+
+
+def _build_requirement_locked_binomial_plan(
+    user_prompt: str, requirements: Dict[str, Any]
+) -> Optional[AnimationPlan]:
+    if not re.search(r"\bbinomial\b", user_prompt or "", re.IGNORECASE):
+        return None
+    if not re.search(r"\bexpand|expansion\b", user_prompt or "", re.IGNORECASE):
+        return None
+
+    n = _extract_binomial_exponent(user_prompt) or 6
+    if n < 1:
+        return None
+
+    title = f"Binomial Expansion (a+b)^{{{n}}}"
+    formula = rf"(a+b)^{{{n}}} = \sum_{{k=0}}^{{{n}}} \binom{{{n}}}{{k}} a^{{{n}-k}} b^k"
+    general_term = rf"\binom{{{n}}}{{k}} a^{{{n}-k}} b^k"
+    terms = _format_binomial_terms_latex(n)
+
+    scene_intro = AnimationScene(
+        scene_id="binomial_intro",
+        template="generic",
+        objects=[
+            AnimationObject(
+                id="title",
+                type="text",
+                parameters={"text": title, "position": [0, 2.6, 0], "font_size": 36},
+            ),
+            AnimationObject(
+                id="formula",
+                type="math_tex",
+                parameters={"text": formula, "position": [0, 1.2, 0], "font_size": 34},
+            ),
+            AnimationObject(
+                id="term_label",
+                type="text",
+                parameters={"text": "General term:", "position": [-3.0, 0.1, 0], "font_size": 28},
+            ),
+            AnimationObject(
+                id="general_term",
+                type="math_tex",
+                parameters={"text": general_term, "position": [1.6, 0.0, 0], "font_size": 32},
+            ),
+        ],
+        animations=[
+            AnimationStep(object_id="title", action="write", duration=1.1),
+            AnimationStep(object_id="formula", action="write", duration=1.4),
+            AnimationStep(object_id="term_label", action="fade_in", duration=0.8),
+            AnimationStep(object_id="general_term", action="write", duration=1.0),
+        ],
+        narration="Introduce the binomial theorem and the general term for the expansion.",
+    )
+
+    scene_terms = AnimationScene(
+        scene_id="binomial_terms",
+        template="generic",
+        depends_on=["binomial_intro"],
+        objects=[
+            AnimationObject(
+                id="terms_title",
+                type="text",
+                parameters={"text": "Expansion", "position": [0, 2.6, 0], "font_size": 34},
+            ),
+            AnimationObject(
+                id="terms",
+                type="math_tex",
+                parameters={"text": terms, "position": [0, 0.6, 0], "font_size": 32},
+            ),
+            AnimationObject(
+                id="pascal_note",
+                type="text",
+                parameters={
+                    "text": "Coefficients come from Pascal's triangle (row n).",
+                    "position": [0, -2.2, 0],
+                    "font_size": 26,
+                },
+            ),
+        ],
+        animations=[
+            AnimationStep(object_id="terms_title", action="write", duration=0.9),
+            AnimationStep(object_id="terms", action="write", duration=1.6),
+            AnimationStep(object_id="pascal_note", action="fade_in", duration=0.9),
+        ],
+        narration="List the expanded terms and highlight the Pascal triangle coefficients.",
+    )
+
+    return AnimationPlan(
+        title=title,
+        style=str(requirements.get("style_hint") or "3b1b"),
+        template=None,
+        parameters={"n": n},
+        scenes=[scene_intro, scene_terms],
+    )
+
+
 class _BSTNode:
     def __init__(self, value: int, idx: int) -> None:
         self.value = value
@@ -2710,6 +2881,10 @@ def _build_requirement_locked_trig_plan(
 def _build_requirement_locked_plan(
     user_prompt: str, requirements: Dict[str, Any]
 ) -> tuple[Optional[AnimationPlan], str]:
+    binomial_plan = _build_requirement_locked_binomial_plan(user_prompt, requirements)
+    if binomial_plan is not None:
+        return binomial_plan, "binomial_requirement_lock"
+
     bst_plan = _build_requirement_locked_bst_plan(user_prompt, requirements)
     if bst_plan is not None:
         return bst_plan, "bst_requirement_lock"

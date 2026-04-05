@@ -113,8 +113,24 @@ def validate_manim_code(code: str) -> List[str]:
         return [f"Parse error: {e}"]
 
 
-def _render_bst_plan_direct(plan: AnimationPlan) -> str:
-    """Render a template-free BST plan into Manim code using primitives only."""
+def _safe_identifier(name: str, fallback: str) -> str:
+    ident = re.sub(r"[^0-9a-zA-Z_]", "_", str(name or "").strip())
+    ident = re.sub(r"_+", "_", ident).strip("_")
+    if not ident:
+        ident = fallback
+    if ident[0].isdigit():
+        ident = f"{fallback}_{ident}"
+    return ident
+
+
+def _format_color(value: object) -> str:
+    if isinstance(value, str) and re.fullmatch(r"[A-Z_]+", value):
+        return value
+    return repr(value)
+
+
+def _render_plan_direct(plan: AnimationPlan) -> str:
+    """Render a template-free plan into Manim code using primitives only."""
     style_name = plan.style or "3b1b"
     style = get_style(style_name)
     background_color = style.get("background_color", "#0d0f14")
@@ -136,9 +152,11 @@ def _render_bst_plan_direct(plan: AnimationPlan) -> str:
     for scene in plan.scenes:
         objects = scene.objects or []
         animations = scene.animations or []
+        id_map: dict[str, str] = {}
 
-        for obj in objects:
-            obj_id = obj.id
+        for idx, obj in enumerate(objects, start=1):
+            obj_id = _safe_identifier(obj.id, f"obj_{idx}")
+            id_map[obj.id] = obj_id
             otype = (obj.type or "text").lower()
             params = obj.parameters or {}
 
@@ -146,10 +164,23 @@ def _render_bst_plan_direct(plan: AnimationPlan) -> str:
                 text = _py(params.get("text", ""))
                 font_size = params.get("font_size", 32)
                 code += f"        {obj_id} = Text({text}, font_size={font_size})\n"
+            elif otype in ("math_tex", "mathtex", "latex", "formula"):
+                text = _py(params.get("text", "x"))
+                code += f"        {obj_id} = MathTex({text})\n"
             elif otype == "line":
                 start = params.get("start", [-1, 0, 0])
                 end = params.get("end", [1, 0, 0])
                 code += f"        {obj_id} = Line({_py(start)}, {_py(end)})\n"
+            elif otype == "arrow":
+                start = params.get("start", [-1, 0, 0])
+                end = params.get("end", [1, 0, 0])
+                code += f"        {obj_id} = Arrow({_py(start)}, {_py(end)})\n"
+            elif otype == "dot":
+                code += f"        {obj_id} = Dot(color=WHITE)\n"
+            elif otype == "circle":
+                radius = params.get("radius", 0.5)
+                color = _format_color(params.get("color", "BLUE"))
+                code += f"        {obj_id} = Circle(radius={radius}, color={color})\n"
             elif otype in ("node", "graph_node"):
                 label = _py(params.get("label", obj_id))
                 code += f"        {obj_id}_node = Circle(radius=0.45, color=BLUE)\n"
@@ -166,7 +197,7 @@ def _render_bst_plan_direct(plan: AnimationPlan) -> str:
 
         for step in animations:
             action = (step.action or "fade_in").lower()
-            obj_id = step.object_id
+            obj_id = id_map.get(step.object_id, _safe_identifier(step.object_id, "obj"))
             duration = float(step.duration or 1.0)
             params = step.parameters or {}
 
@@ -179,9 +210,14 @@ def _render_bst_plan_direct(plan: AnimationPlan) -> str:
             elif action == "highlight":
                 code += f"        self.play(Indicate({obj_id}), run_time={duration:.2f})\n"
             elif action == "color":
-                color = params.get("color", "YELLOW")
+                color = _format_color(params.get("color", "YELLOW"))
                 code += (
                     f"        self.play({obj_id}.animate.set_color({color}), run_time={duration:.2f})\n"
+                )
+            elif action == "move":
+                to_pos = params.get("to", [0, 0, 0])
+                code += (
+                    f"        self.play({obj_id}.animate.move_to({_py(to_pos)}), run_time={duration:.2f})\n"
                 )
             else:
                 code += f"        self.play(FadeIn({obj_id}), run_time={duration:.2f})\n"
@@ -410,11 +446,26 @@ async def render_graph_async(job_id: str):
         if requirement_lock == "bst_requirement_lock":
             logs.append("Rendering BST plan with direct renderer")
             publish_log(job_id, "Rendering BST plan directly (no templates)...")
-            manim_code = _render_bst_plan_direct(plan)
+            manim_code = _render_plan_direct(plan)
         else:
-            logs.append("Rendering fresh scene-based Manim code")
-            publish_log(job_id, "Generating fresh Manim code from current plan...")
-            manim_code = generate_manim_code_from_plan(plan, prompt)
+            use_direct_renderer = False
+            if plan.scenes:
+                use_direct_renderer = all(
+                    (scene.template in {None, "generic"} and not (scene.templates or []))
+                    for scene in plan.scenes
+                )
+                use_direct_renderer = use_direct_renderer and any(
+                    (scene.objects or scene.animations) for scene in plan.scenes
+                )
+
+            if use_direct_renderer:
+                logs.append("Rendering plan with direct renderer")
+                publish_log(job_id, "Rendering plan directly (no templates)...")
+                manim_code = _render_plan_direct(plan)
+            else:
+                logs.append("Rendering fresh scene-based Manim code")
+                publish_log(job_id, "Generating fresh Manim code from current plan...")
+                manim_code = generate_manim_code_from_plan(plan, prompt)
 
         await update_job_status(job_id, JobStatus.RUNNING, progress=50)
 
