@@ -2311,6 +2311,186 @@ def _build_requirement_locked_plot_plan(
     return _build_plot_plan_from_structured(user_prompt, plot_data)
 
 
+class _BSTNode:
+    def __init__(self, value: int, idx: int) -> None:
+        self.value = value
+        self.idx = idx
+        self.left: Optional["_BSTNode"] = None
+        self.right: Optional["_BSTNode"] = None
+
+
+def _bst_insert(root: Optional[_BSTNode], node: _BSTNode) -> _BSTNode:
+    if root is None:
+        return node
+    if node.value < root.value:
+        root.left = _bst_insert(root.left, node)
+    else:
+        root.right = _bst_insert(root.right, node)
+    return root
+
+
+def _extract_bst_values(user_prompt: str) -> List[int]:
+    values: List[int] = []
+    prompt = user_prompt or ""
+    # Remove search-target phrases so the target is not treated as an insertion value.
+    prompt = re.sub(
+        r"\b(search|find)\s+(?:for\s+)?(?:value\s+)?-?\d+",
+        "",
+        prompt,
+        flags=re.IGNORECASE,
+    )
+    for match in re.findall(r"-?\d+", prompt):
+        try:
+            values.append(int(match))
+        except ValueError:
+            continue
+    return values
+
+
+def _extract_bst_search_target(user_prompt: str) -> Optional[int]:
+    if not user_prompt:
+        return None
+    match = re.search(r"search\s+for\s+value\s+(-?\d+)", user_prompt, re.IGNORECASE)
+    if not match:
+        match = re.search(r"find\s+value\s+(-?\d+)", user_prompt, re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _build_requirement_locked_bst_plan(
+    user_prompt: str, requirements: Dict[str, Any]
+) -> Optional[AnimationPlan]:
+    if not re.search(r"\b(bst|binary\s+search\s+tree)\b", user_prompt or "", re.IGNORECASE):
+        return None
+
+    values = _extract_bst_values(user_prompt)
+    if not values:
+        return None
+
+    nodes: List[_BSTNode] = []
+    root: Optional[_BSTNode] = None
+    for idx, value in enumerate(values, start=1):
+        node = _BSTNode(value=value, idx=idx)
+        nodes.append(node)
+        root = _bst_insert(root, node)
+
+    positions: Dict[int, List[float]] = {}
+
+    def _assign_positions(node: Optional[_BSTNode], x: float, y: float, dx: float) -> None:
+        if node is None:
+            return
+        positions[node.idx] = [round(x, 2), round(y, 2), 0]
+        next_dx = max(0.8, dx * 0.55)
+        _assign_positions(node.left, x - dx, y - 1.5, next_dx)
+        _assign_positions(node.right, x + dx, y - 1.5, next_dx)
+
+    _assign_positions(root, 0.0, 1.5, 3.2)
+
+    objects: List[AnimationObject] = [
+        AnimationObject(
+            id="bst_title",
+            type="text",
+            parameters={
+                "text": "Binary Search Tree",
+                "position": [0, 2.6, 0],
+                "font_size": 38,
+            },
+        )
+    ]
+
+    edges: List[AnimationObject] = []
+    node_objects: List[AnimationObject] = []
+    for node in nodes:
+        pos = positions.get(node.idx, [0, 0, 0])
+        node_objects.append(
+            AnimationObject(
+                id=f"node_{node.idx}",
+                type="node",
+                parameters={"label": str(node.value), "position": pos},
+            )
+        )
+
+    def _add_edge(parent: Optional[_BSTNode], child: Optional[_BSTNode]) -> None:
+        if parent is None or child is None:
+            return
+        start = positions.get(parent.idx, [0, 0, 0])
+        end = positions.get(child.idx, [0, 0, 0])
+        edges.append(
+            AnimationObject(
+                id=f"edge_{parent.idx}_{child.idx}",
+                type="line",
+                parameters={"start": start, "end": end},
+            )
+        )
+
+    for node in nodes:
+        _add_edge(node, node.left)
+        _add_edge(node, node.right)
+
+    objects.extend(edges)
+    objects.extend(node_objects)
+
+    animations: List[AnimationStep] = [
+        AnimationStep(object_id="bst_title", action="write", duration=1.2),
+    ]
+    for edge in edges:
+        animations.append(AnimationStep(object_id=edge.id, action="create", duration=0.6))
+    for node_obj in node_objects:
+        animations.append(AnimationStep(object_id=node_obj.id, action="fade_in", duration=0.6))
+
+    search_target = _extract_bst_search_target(user_prompt)
+    if search_target is not None and root is not None:
+        search_path: List[_BSTNode] = []
+        current = root
+        while current is not None:
+            search_path.append(current)
+            if search_target == current.value:
+                break
+            if search_target < current.value:
+                current = current.left
+            else:
+                current = current.right
+
+        for node in search_path:
+            animations.append(
+                AnimationStep(object_id=f"node_{node.idx}", action="highlight", duration=0.7)
+            )
+        last = search_path[-1]
+        if search_target == last.value:
+            animations.append(
+                AnimationStep(
+                    object_id=f"node_{last.idx}",
+                    action="color",
+                    parameters={"color": "GREEN"},
+                    duration=0.8,
+                )
+            )
+
+    style_hint = str(requirements.get("style_hint") or "3b1b")
+    plan_title = "Binary Search Tree Visualization"
+    return AnimationPlan(
+        title=plan_title,
+        style=style_hint,
+        template=None,
+        parameters={"values": values, "search_target": search_target},
+        scenes=[
+            AnimationScene(
+                scene_id="bst_visualization",
+                template="generic",
+                objects=objects,
+                animations=animations,
+                narration=(
+                    "Build the binary search tree from the given values, then trace the search path."
+                ),
+            )
+        ],
+    )
+
+
 def _build_requirement_locked_solver_plan(
     user_prompt: str, requirements: Dict[str, Any]
 ) -> Optional[AnimationPlan]:
@@ -2530,6 +2710,10 @@ def _build_requirement_locked_trig_plan(
 def _build_requirement_locked_plan(
     user_prompt: str, requirements: Dict[str, Any]
 ) -> tuple[Optional[AnimationPlan], str]:
+    bst_plan = _build_requirement_locked_bst_plan(user_prompt, requirements)
+    if bst_plan is not None:
+        return bst_plan, "bst_requirement_lock"
+
     solver_plan = _build_requirement_locked_solver_plan(user_prompt, requirements)
     if solver_plan is not None:
         return solver_plan, "solver_graph_requirement_lock"

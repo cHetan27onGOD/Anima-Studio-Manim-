@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.models import Job, JobStatus
 from app.schemas.animation import AnimationPlan
 from app.services.llm import generate_manim_code, generate_plan
+from app.templates.styles import get_style
 from app.worker.celery_app import celery_app
 
 # Create dedicated async engine for worker with NullPool
@@ -110,6 +111,84 @@ def validate_manim_code(code: str) -> List[str]:
         return [f"SyntaxError at line {e.lineno}: {e.msg} — {e.text!r}"]
     except Exception as e:
         return [f"Parse error: {e}"]
+
+
+def _render_bst_plan_direct(plan: AnimationPlan) -> str:
+    """Render a template-free BST plan into Manim code using primitives only."""
+    style_name = plan.style or "3b1b"
+    style = get_style(style_name)
+    background_color = style.get("background_color", "#0d0f14")
+    render_profile = plan.parameters.get("render_profile", {}) if isinstance(plan.parameters, dict) else {}
+    frame_rate = render_profile.get("frame_rate", 30)
+
+    code = (
+        "from manim import *\n"
+        "import numpy as np\n\n"
+        f"config.background_color = '{background_color}'\n"
+        f"config.frame_rate = {int(frame_rate)}\n\n"
+        "class Scene1(Scene):\n"
+        "    def construct(self):\n"
+    )
+
+    def _py(val: object) -> str:
+        return repr(val)
+
+    for scene in plan.scenes:
+        objects = scene.objects or []
+        animations = scene.animations or []
+
+        for obj in objects:
+            obj_id = obj.id
+            otype = (obj.type or "text").lower()
+            params = obj.parameters or {}
+
+            if otype == "text":
+                text = _py(params.get("text", ""))
+                font_size = params.get("font_size", 32)
+                code += f"        {obj_id} = Text({text}, font_size={font_size})\n"
+            elif otype == "line":
+                start = params.get("start", [-1, 0, 0])
+                end = params.get("end", [1, 0, 0])
+                code += f"        {obj_id} = Line({_py(start)}, {_py(end)})\n"
+            elif otype in ("node", "graph_node"):
+                label = _py(params.get("label", obj_id))
+                code += f"        {obj_id}_node = Circle(radius=0.45, color=BLUE)\n"
+                code += f"        {obj_id}_label = Text({label}, font_size=20).move_to({obj_id}_node.get_center())\n"
+                code += f"        {obj_id} = VGroup({obj_id}_node, {obj_id}_label)\n"
+            else:
+                # Fallback to text to avoid runtime errors
+                text = _py(params.get("text", obj_id))
+                code += f"        {obj_id} = Text({text}, font_size=24)\n"
+
+            pos = params.get("position")
+            if pos is not None:
+                code += f"        {obj_id}.move_to({_py(pos)})\n"
+
+        for step in animations:
+            action = (step.action or "fade_in").lower()
+            obj_id = step.object_id
+            duration = float(step.duration or 1.0)
+            params = step.parameters or {}
+
+            if action == "write":
+                code += f"        self.play(Write({obj_id}), run_time={duration:.2f})\n"
+            elif action == "create":
+                code += f"        self.play(Create({obj_id}), run_time={duration:.2f})\n"
+            elif action == "fade_in":
+                code += f"        self.play(FadeIn({obj_id}), run_time={duration:.2f})\n"
+            elif action == "highlight":
+                code += f"        self.play(Indicate({obj_id}), run_time={duration:.2f})\n"
+            elif action == "color":
+                color = params.get("color", "YELLOW")
+                code += (
+                    f"        self.play({obj_id}.animate.set_color({color}), run_time={duration:.2f})\n"
+                )
+            else:
+                code += f"        self.play(FadeIn({obj_id}), run_time={duration:.2f})\n"
+
+        code += "        self.wait(0.5)\n"
+
+    return code
 
 
 async def update_job_status(job_id: str, status: JobStatus, **kwargs):
@@ -321,10 +400,21 @@ async def render_graph_async(job_id: str):
         plan_dict = plan.model_dump()
         await update_job_status(job_id, JobStatus.RUNNING, plan_json=plan_dict, progress=25)
 
-        # Step 2: Scene-based Manim codegen (no template routing shortcuts)
-        logs.append("Rendering fresh scene-based Manim code")
-        publish_log(job_id, "Generating fresh Manim code from current plan...")
-        manim_code = generate_manim_code_from_plan(plan, prompt)
+        # Step 2: Prefer direct rendering for template-free BST plans.
+        requirement_lock = (
+            plan.parameters.get("input_understanding", {}).get("requirement_lock")
+            if isinstance(plan.parameters, dict)
+            else None
+        )
+
+        if requirement_lock == "bst_requirement_lock":
+            logs.append("Rendering BST plan with direct renderer")
+            publish_log(job_id, "Rendering BST plan directly (no templates)...")
+            manim_code = _render_bst_plan_direct(plan)
+        else:
+            logs.append("Rendering fresh scene-based Manim code")
+            publish_log(job_id, "Generating fresh Manim code from current plan...")
+            manim_code = generate_manim_code_from_plan(plan, prompt)
 
         await update_job_status(job_id, JobStatus.RUNNING, progress=50)
 

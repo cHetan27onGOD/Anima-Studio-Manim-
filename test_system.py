@@ -7,6 +7,7 @@ Tests:
 3. Verifies different prompts produce different plans
 """
 import http.client
+import pytest
 import json
 import time
 import sys
@@ -20,6 +21,8 @@ PROMPTS = [
     "Two circles moving right with smooth motion",
     "Process flow: User -> Auth -> API -> Database",
 ]
+
+pytest.skip("system test skipped in pytest runs", allow_module_level=True)
 
 def make_request(method, path, body=None, headers=None, auth_token=None):
     """Make HTTP request"""

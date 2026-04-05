@@ -54,7 +54,6 @@ from app.templates.machine_learning.templates import (
 from app.templates.algorithms.templates import (
     BFSDFSComparisonTemplate,
     BFSTraversalTemplate,
-    BinarySearchTreeTemplate,
     DFSTraversalTemplate,
     DijkstraTemplate,
     GraphVisualizationTemplate,
@@ -120,7 +119,6 @@ TEMPLATES: Dict[str, Type[BaseTemplate]] = {
     "dijkstra": DijkstraTemplate,
     "topological_sort": TopologicalSortTemplate,
     "sorting": SortingTemplate,
-    "binary_search_tree": BinarySearchTreeTemplate,
     # Primitives
     "draw_curve": DrawCurveTemplate,
     "place_point": PlacePointTemplate,
